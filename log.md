@@ -50,6 +50,28 @@ Our running work journal, updated at least weekly. Newest entries go at the top.
 - There are buttons to share an invite link or a qr code to send. 
 - You can also choose if you have to approve collaborators or not. 
 
+4. Multiplayer Video Game
+
+- Lobby system with nameplates
+- In game models with independent movement
+- Audio Cues and Communication with indicators on whose speaking
+- Visual indicators with call tags, and feedback. 
+- Post game scoreboards and statistics
+- Map changes
+- Live in game feeds that usually use text to narrate game events.
+
+5. Teams
+
+ - Presence indicators and status icons.
+ - Activity status with updates on when people are responding.
+ - Meeting and channel rooms that show activity.
+
+ 6. Figma
+
+ - Live Cursor with ability to chat, follow, spotlight, comment. Color coded and feels "real-time"
+- Live selection and highlighting to see what others are working on, again feels very "real-time" so activity truly feels collaborative.
+
+
 
 ## 2026-11-4
 
