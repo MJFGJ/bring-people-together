@@ -47,7 +47,7 @@ Our running work journal, updated at least weekly. Newest entries go at the top.
 - There are buttons to share an invite link or a qr code to send. 
 - You can also choose if you have to approve collaborators or not. 
 
-4. Multipayer Video Game
+4. Multiplayer Video Game
 
 - Lobby system with nameplates
 - In game models with independent movement
@@ -66,7 +66,7 @@ Our running work journal, updated at least weekly. Newest entries go at the top.
  6. Figma
 
  - Live Cursor with ability to chat, follow, spotlight, comment. Color coded and feels "real-time"
-- Live selecction and highlighting to see what others are working on, again feels very "real-time" so activity truly feels collaborative.
+- Live selection and highlighting to see what others are working on, again feels very "real-time" so activity truly feels collaborative.
 
 
 
