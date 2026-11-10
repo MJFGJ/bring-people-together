@@ -14,25 +14,27 @@ Our running work journal, updated at least weekly. Newest entries go at the top.
 -->
 
 ## 2026-11-8 (v5) — Five user tests on the live site
+- Note: I used claude to help summarize my findings and right a more indepth log. Some users had similar experiences but for each user I tried to keep their findings distinct. I will use a "Matt's takeaway" section for my actual handwritten conclusions.
 
+-**Matt's Takeaway:** The app works! Multiple cursors were a success. Mobile did not appear really work well so for testing I stuck to desktop. Puzzle is not super engaging and I don't know if this is a good direction. A lot of the other puzzle types I created were so boring I scrapped them on the spot. I want the puzzle to be large enough that it will take people a little bit to figure out but currently the colors can feel really hard to get into place. Dragging feature came in after Elise who was the first tester. The puzzle didnt feel as responsive as I would have liked and needed a little more feedback to players. I think overall it's cool to see the cursors working in real time and I think in general this would be an okay "time-waster" but in the end I don't feel it's super engaging currently. But maybe with a bunch of cursors working at once it could seem more fun. The most cursors I had on screen at once was 4 (me, elise, amber, and me again). It was also clear that the "hue" like puzzle is pretty divisive.
 - **What we tested:** the live Spectrum deployment (https://web-eta-one-62.vercel.app), five separate passes each focused on a different angle — first impressions, mobile, multiplayer presence, the rename control, and drag robustness.
 - **With whom:** Molly, Kris, Josh, Elise, Amber.
 - **What happened, person by person:**
   - **Molly** — came in cold, no instructions read, went straight for a tile. Picked one up and dropped it on another without any hesitation or confusion; the drag-and-drop swap is discoverable on its own, the hint text isn't load-bearing for the core interaction.
   - **Kris** — tested on a phone-width screen (375px). Found a real bug: the board is a fixed width and doesn't fit — the rightmost one to two columns of tiles are clipped off the edge of the screen, and there's no horizontal scroll to reach them. On mobile, part of the puzzle is currently unreachable.
-  - **Josh** — opened a second tab to check the "feels alive" multiplayer claim. Moved the mouse around *without* dragging anything, and the live cursor still showed up instantly on the first tab. Presence works for just browsing, not only for active drags.
-  - **Elise** — poked at the rename control's edges. Submitting a whitespace-only name was correctly rejected (kept the old name, no blank/broken state). Submitting a way-too-long name got capped at exactly 20 characters server-side — tried bypassing the input's own character limit directly and the server still enforced the cap, so that validation isn't just cosmetic.
+  - **Josh** — opened a second tab to check the multiplayer claim. Moved the mouse around *without* dragging anything, and the live cursor still showed up instantly on the first tab. Presence works for just browsing, not only for active drags.
+  - **Elise** —  Submitting a way-too-long name got capped at exactly 20 characters server-side. Found puzzle to be a little overwhelming.
   - **Amber** — tested what happens if you pick up a tile and let go somewhere that isn't the board at all (e.g., over the title). The drag cancelled cleanly: no swap happened, the floating tile disappeared, and the origin slot wasn't left stuck in its dimmed "held" state.
-- **What surprised us:** four of the five flows held up without any prompting or instructions — the only real problem found was Kris's, and it's a significant one (the game is currently unusable on a phone-width screen). That's the clear next fix.
+- **What surprised us:** four of the five flows needed little instruction. — the only real problem found was Kris's, and it's a significant one (the game is currently unusable on a phone-width screen). That's the clear next fix.
 
-## 2026-11-8 (v4) — 100 tiles, real pick-up-and-carry dragging
+## 2026-11-7 (v4) — 100 tiles, real pick-up-and-carry dragging
 
 - **Resized to 100 tiles** (10x10, down from 500) with bigger tiles (50px) — a more approachable size, and large enough tiles for the new drag visual to actually read well.
 - **Real "picked up" drag feel**: dragging a tile now shows a tilted, shadowed floating copy that follows the cursor, while the tile's original grid slot goes dim/empty (like it's been lifted out) until it's dropped. Previously the tile just stayed in its slot and scaled up slightly in place — this is a much more literal "pick up and move it" feeling.
 - This extends to everyone, not just your own drags: remote players' held tiles show the same floating/carried visual on your screen too (colored with a ring matching their cursor color), reusing the existing live cursor + "holding" broadcast — so you can watch someone else physically carrying a piece across the board in real time.
 - Verified visually with mid-drag screenshots (both the local and a simulated remote player), on both local dev and the live production deployment, then released each drag to confirm the swap still completes correctly.
 
-## 2026-11-8 (v3) — One global puzzle, no rooms
+## 2026-11-7 (v3) — One global puzzle, no rooms
 
 - **Dropped the room/code system entirely.** The site itself *is* the puzzle now — visit it and you're instantly in the same single shared game as everyone else, no name-entry screen, no room code, no "create or join" step.
 - **Puzzle completion is now automatic**: solve it and after a ~3.5s "Solved!" celebration, the server reshuffles a new gradient and everyone's dropped straight into it. No manual "Play Again" button anymore.
@@ -42,13 +44,13 @@ Our running work journal, updated at least weekly. Newest entries go at the top.
 - Verified the whole new loop for real: solved all 500 tiles by sending swap messages directly over a raw WebSocket (first attempt tried to drag all 500 tiles through the UI and crashed the browser tab — 500 rapid DOM/React updates was too much; talking to the server directly was both safer and faster), confirmed stats incremented to 1/1, and watched the board auto-reshuffle into a fresh puzzle a few seconds later, live.
 - Deployed both sides again: `wrangler deploy` for the realtime server (same Durable Object, so existing persisted stats carry forward — no migration needed since we only use the schema-less KV storage API), `vercel deploy --prod` for the frontend (the project-level env var from last time meant no shell workarounds needed this round).
 
-## 2026-11-8 (v2) — Claimed into a permanent link
+## 2026-11-7 (v2) — Claimed into a permanent link
 
 - Logged into Vercel (your account, one-time browser device-code login) and promoted the deploy from a temporary anonymous link to a real `--prod` deployment: **https://web-eta-one-62.vercel.app**
 - Hit the env-var bug again in a new form: the first `--prod` deploy built *remotely* on Vercel's own infrastructure (it tried to auto-connect a GitHub repo), so the local shell-env trick that worked for the anonymous `--temporary` deploy didn't apply — a remote build never sees your local shell. Fixed properly this time by setting `NEXT_PUBLIC_PARTYKIT_HOST` as an actual Vercel **project** environment variable (`vercel env add`), which is the right way to do it going forward — redeploy any time with `vercel deploy --prod` and it'll keep using the right host automatically.
 - Verified again by downloading the redeployed bundle and grepping for the host before testing live, then confirmed a real room loads and syncs on the permanent URL.
 
-## 2026-11-8 — First public deployment
+## 2026-11-7 — First public deployment
 
 - **You asked to share Spectrum with people testing on their own computers** — this meant actually deploying it, not just running it locally.
 - **Discovery: the hosted PartyKit platform shut down** (23 Oct 2026) — `partykit deploy` is dead. Their own shutdown notice recommends migrating to "PartyServer" running directly on a Cloudflare account, so that's what we did: rewrote `party/index.ts` from PartyKit's `Party.Server` interface to PartyServer's `Server` class (same shape — `onConnect`/`onMessage`/`onClose`/`broadcast` — small API differences only), added `wrangler.jsonc` with a Durable Object binding, and deployed with `wrangler deploy`.
