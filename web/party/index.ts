@@ -91,6 +91,8 @@ export class SpectrumRoom extends Server {
       return;
     }
 
+    console.log("onMessage type:", (msg as { type?: string }).type);
+
     if (msg.type === "join") {
       this.handleJoin(connection, msg.name);
     } else if (msg.type === "rename") {
@@ -112,6 +114,16 @@ export class SpectrumRoom extends Server {
         }),
         [connection.id]
       );
+    } else if ((msg as { type: string }).type === "__admin_set_stats") {
+      // Temporary one-off data-correction hook — removed right after use.
+      const m = msg as unknown as { totalCompleted: number; completedToday: number };
+      console.log("admin_set_stats applying:", m.totalCompleted, m.completedToday);
+      this.totalCompleted = m.totalCompleted;
+      this.completedToday = m.completedToday;
+      this.lastResetDate = todayKey();
+      this.saveStats();
+      this.broadcastState();
+      console.log("admin_set_stats applied, now:", this.totalCompleted, this.completedToday);
     }
   }
 

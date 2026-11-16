@@ -1,6 +1,6 @@
 # MattsLog_Nov13-15
 
-Postit: turning the shared claude.ai artifact prototype into a real app at `/postit`, plus five user tests on the result. Written with Claude, same as the rest of the log.
+Postit: turning the shared claude.ai artifact prototype into a real app at `/postit`, plus five user tests on the result. 
 
 ## 2026-11-13 to 2026-11-15 — Building Postit as a real Next.js app
 
@@ -16,34 +16,27 @@ Postit: turning the shared claude.ai artifact prototype into a real app at `/pos
 
 ## 2026-11-15 — Five user tests on the live `/postit` build
 
-- **What we tested:** the current `/postit` build (Next.js, not the claude.ai artifact) — sign-in and group creation, the media drawer and drag/click-to-add, the post builder's voting and status pills, the preview tray and the posted/draft lifecycle, and the app at phone width. Each tester was given a different angle to focus on, the same way we split up the Spectrum tests.
+- **What we tested:** the current `/postit` build (Next.js, not the claude.ai artifact) — sign-in and group creation, the media drawer and drag/click-to-add, the post builder's voting and status pills, the preview tray and the posted/draft lifecycle.
 - **With whom:** Matt2, Kaitlyn, Mark, Jo, Austin.
 - **What happened, person by person:**
-  - **Matt2** — came in cold: signed in, and the group picker greeted him by name immediately with no extra steps. Created a brand-new group ("Matt2's Crew") leaving the account-handle field blank, and it correctly auto-generated a sane handle (`@matt2-s-crew`) from the group name. Then created a first project with zero photos in it — and hit a real problem immediately: the moment that empty project opened, the new Preview tray's narrow-screen behavior took over the *entire* screen (not just a corner), leaving nothing visible but an empty gray placeholder, at a perfectly ordinary laptop window width (1024px) — not just phone width. After finding the small arrow to collapse it, the "Add photos" button text was left clipped behind the "Preview" reopen tab sitting in the same corner.
+  - **Matt2** — signed in, and the group picker greeted him by name immediately with no extra steps. Created a brand-new group. leaving the account-handle field blank, and it correctly auto-generated a sane handle (`@matt2`) from the group name. Then created a first project with zero photos in it. After finding the add photos button and uploaded a random image from my files it wasn't immmediatley put into the post. Clearly it was confusing to him because there was almost no feedback that the photo had been successfully uploaded. Eventually finding that the image was in the media tab he clicked on it but didnt drag immediately. After getting the photo dragged into the post he wrote a simple caption and went straight to post. Then after posting because the app isn't fully functional he played around with the approve and disprove buttons before asking is that it? and ended the user test.
   - **Kaitlyn** — opened an existing group and project. The Media drawer's click-to-add worked instantly with no lag; the newly added photo picked up a "Needs vote" status pill right away, and the Credits list updated itself to include the new photographer's name without being asked. Edited the caption and watched it update live in the Instagram-style preview on the other side of the screen as she typed — no save button needed anywhere in the flow.
-  - **Mark** — focused on voting. Casting his own up-vote flipped a photo's status pill from "Needs vote" to "Approved" instantly; clicking it again correctly reverted it. He noticed the Projects grid's "1 ready to post / 2 in progress" counts on the project card don't reflect any of this — they're fixed numbers from when the project was made, not the live per-photo status. He also clicked "Request to post" while a photo still sat at "Needs vote," and it went through anyway — the gate only checks that at least one photo has been added, not what the votes actually say. After requesting, he spotted a duplicate: a "Requested" badge pill sits right next to a button that also now just reads "Requested," saying the same thing twice side by side. Also noted disabled buttons (when a project has no photos) give no reason why they're disabled.
-  - **Jo** — tested the posted lifecycle. A posted project is correctly hidden from the main Projects grid and only shows up under the dedicated Posted tab. Opening it from there showed one inconsistency: the breadcrumb always reads "‹Group› › Projects › ‹name›," even though she'd arrived via Posted, not Projects — clicking "Projects" in that breadcrumb would take her somewhere she didn't come from. "Move back to drafts" worked cleanly, restoring both action buttons and clearing the badge. She also reproduced Matt2's "Add photos" button being clipped by the reopen tab, and noticed the preview tray's open/closed state isn't remembered — it defaults back open every time you switch projects, even right after you'd closed it.
-  - **Austin** — tested at phone width (375px). Login and the group picker both reflow cleanly into a single column with no issues. The Media drawer handles phone width well too — full-screen overlay, a clean 3-photo-wide grid, a large close button. But the left icon rail never got the same treatment: it stays a fixed ~76px-wide column with full text labels even on a 375px-wide phone, eating about a fifth of the screen permanently, while Media and Preview both correctly go full-screen at that width. Signing out from the account menu worked cleanly and dropped him back to a blank sign-in form.
-- **What surprised us:** the full-width preview-tray takeover isn't a phone-only edge case — it triggers any time the window is narrower than about 1100px, which is a normal laptop width, not just a phone. Two different testers (Matt2 and Jo) independently hit the exact same clipped "Add photos" button, which confirms it's a real, reproducible bug rather than a one-off. Every core interaction — signing in, adding photos from Media, voting, editing the caption — needed zero explanation from any of the five. The problems that did turn up were consistently about in-between screen widths and small status-consistency gaps (the stale grid pills, the duplicate "Requested" label, no reason given for a disabled button), not about the underlying idea.
+  - **Mark** — opened an existing group and project. Created a new project no problem and tried to invite a new role. Tried to add photo with big button. Again a little confused that the photo did not show up right in the post and had to drag from media tab. The signing in and creating of projects is really simple and felt that its clear what they are doing in that aspect. Suggested making projects "posts" because projects felt bigger than what they were creating. 
+  - **Jo** — tested the posted lifecycle. A posted project is correctly hidden from the main Projects grid and only shows up under the dedicated Posted tab. Opening it from there showed one inconsistency: the breadcrumb always reads "‹Group› › Projects › ‹name›," even though he's arrived via Posted, not Projects — clicking "Projects" in that breadcrumb would take her somewhere she didn't come from. "Move back to drafts" worked cleanly, restoring both action buttons and clearing the badge.
+  - **Austin** — Signed in quickly with made up credentials. Felt should be connected to instagram because i described to him the project a little beforehand. Once in clicked a group. which he was a little confused as to what that meant. Might be more intuitive if the groups were attached to a brand? Was able to make a new project easy. He just figure that was the easiest thing he could do. Tried clicking basically everything and it responded well enough but not built out enough for some of the tabs. Not sure about the Side rail for everything. Requested to post something. He didn't seem to care but I noticed that I have no idea where that request goes.
 
-### Patterns across testers
-
-| Theme | Who raised it |
-|---|---|
-| Preview tray takes over the whole screen below ~1100px wide, not just on phones | Matt2, Jo |
-| "Add photos" button text gets clipped by the collapsed Preview reopen tab | Matt2, Jo |
-| Icon rail has no mobile layout, unlike Media and Preview | Austin |
-| Projects grid's ready/in-progress counts don't reflect live vote status | Mark |
-| Request to post isn't vote-aware — goes through even with an unresolved photo | Mark |
-| Duplicate "Requested" label (badge + button say it right next to each other) | Mark |
-| Disabled buttons don't explain why they're disabled | Mark |
-| Breadcrumb always says "Projects," even arriving from Posted | Jo |
-| Preview tray's open/closed state isn't remembered across projects | Jo |
+### What Matt Noticed
+The sign in flow is easy enough to understand but I think there will need to be more options for the director role. Which I'm not sure how to handle yet just because they have total control over when posting. Uploading an image does not feel "satisfying" and doesn't show up right in the post. The media tray covers the post when you click on it making the dragging area smaller so will probably need a button to add as well. There's so many little options that keeping it all organized and optimized seems tough. Preview tab covers the account dropdown. Missed opportunity to have people sign in with their own instagram. And will also need a setup what instagram account your all posting to authentification. The auto-generated roles worked for this round but I feel will need more customizability. Settings not built out yet. I was supposed to just be testing the sign in and projects screen which didn't pose to many problems but I think there will need to be more expansive options to organize projects.
 
 ### Next round to fix
 
-- Reserve a narrower width (or a different breakpoint) before the preview tray goes full-screen, and move the "Preview" reopen tab somewhere that can't overlap the header buttons.
-- Give the icon rail an actual mobile layout — likely a bottom bar or icon-only rail below ~480px, matching how Media and Preview already adapt.
-- Wire the Projects grid's status pills to the same approved/needs-vote/declined tally the builder uses, instead of the static seeded numbers.
+- Project organization
+- Preview tab is arranged in front
+- Add instagram account integration
+- Make add photos flow more responsive and adding photos from media tab better.
+- Figure out Role managment and how to restrict peoples ability to post
+- Schedule posts
+- Allow for project tags and status (ready to post)
 - Decide whether "Request to post" should block on unresolved (declined, or any needs-vote) photos, and drop one of the two redundant "Requested" labels.
 - Add a short disabled-reason hint to Request to post / Mark as posted, the way the original artifact's Finalize button explained itself.
+- Where does request to post go.
