@@ -1,0 +1,10 @@
+2026-11-16 — A/B test: stripped-down vs. full Launch carousel
+
+- **What we tested:** two versions of the Launch carousel + media screen, starting from the same photos and votes.
+  - **Version A:** one screen with photos on the left and the carousel on the right. Drag to add or reorder, big thumbs up/down, and photos marked "In" (3 ups) or "Out" (3 downs).
+  - **Version B:** the full builder without the sidebar or Instagram preview. It has a media tray, status bands and filters, approve/decline, the caption, credits, live cursors and a Finalize bar.
+- **With whom:** Ellie,Piper,Bella,Aubrey,Viola. Each person saw Version A first, then Version B.
+- **What happened:** In Version A, users understood right away how to bring in photos, move them around and vote. They preferred the "In / Out" wording over "Approved / Declined." In Version B, users said it felt overwhelming in comparison.
+- **What surprised us:** even after learning the task in A, users found B harder, which points to the extra UI rather than unfamiliarity. Users described A as intuitive.
+- **Caveat:** order was the same for everyone (A then B). Next round should switch the order for half the testers.
+- **Next:** build from Version A, use "In / Out" language, and add features back one at a time only where testing shows a need.
