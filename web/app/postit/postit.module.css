@@ -250,6 +250,30 @@
   gap: 10px;
   margin-top: 18px;
 }
+.cardWrap {
+  position: relative;
+}
+.cardDelete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  z-index: 2;
+}
+.cardWrap:hover .cardDelete {
+  opacity: 1;
+}
+.cardDelete:hover {
+  background: var(--bad);
+}
 .groupCard {
   display: flex;
   align-items: center;
@@ -880,7 +904,7 @@
 }
 .drawerGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   gap: 8px;
   max-height: 560px;
   overflow-y: auto;
@@ -1624,7 +1648,7 @@
 /* ---------- simplified post page ---------- */
 .postLayout {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 20px;
   margin-top: 18px;
   align-items: start;
@@ -1677,6 +1701,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  cursor: grab;
+  border-radius: 10px;
+  transition: box-shadow 0.12s;
+}
+.voteCardDragOver {
+  box-shadow: 0 0 0 2px var(--accent);
 }
 .voteCardMedia {
   position: relative;

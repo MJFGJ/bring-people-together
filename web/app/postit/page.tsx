@@ -353,6 +353,13 @@ const normalizeHandle = (s: string) => {
   return trimmed ? `@${trimmed}` : "";
 };
 
+// Testing backdoor: signing up with the username "AAdmin" grants admin
+// rights in every group, so testers don't have to be invited as an admin
+// everywhere just to try admin-only controls like deleting.
+function isMasterAdmin(user: CurrentUser): boolean {
+  return user.username.replace(/^@/, "").toLowerCase() === "aadmin";
+}
+
 const ICON_PATHS = {
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   chev: '<path d="m6 9 6 6 6-6"/>',
@@ -609,6 +616,19 @@ export default function PostitPage() {
     );
   };
 
+  const handleDeleteGroup = (groupId: string) => {
+    const group = groupsRef.current.find((g) => g.id === groupId);
+    if (!group) return;
+    commitGroups(groupsRef.current.filter((g) => g.id !== groupId));
+    if (activeGroupId === groupId) {
+      setActiveGroupId(null);
+      setStage("groups");
+      setScreen("posts");
+      setActivePostId(null);
+    }
+    pushToast(`Deleted <em>${group.name}</em>.`);
+  };
+
   const handleSaveMembers = (groupId: string, nextMembers: Member[]) => {
     const group = groups.find((g) => g.id === groupId);
     if (!group) return;
@@ -680,6 +700,23 @@ export default function PostitPage() {
     setScreen("post");
     setCreatingPost(false);
     pushToast(`Created <em>${name}</em>. Add some photos to get started.`);
+  };
+
+  const handleDeletePost = (groupId: string, postId: string) => {
+    const group = groupsRef.current.find((g) => g.id === groupId);
+    const post = group?.posts.find((p) => p.id === postId);
+    if (!group || !post) return;
+    updateGroup(groupId, (g) => ({
+      ...g,
+      posts: g.posts.filter((p) => p.id !== postId),
+      folders: g.folders.filter((f) => f.id !== post.folderId),
+      media: g.media.map((m) => (m.folderId === post.folderId ? { ...m, folderId: null } : m)),
+    }));
+    if (activeGroupId === groupId && activePostId === postId) {
+      setActivePostId(null);
+      setScreen("posts");
+    }
+    pushToast(`Deleted <em>${post.name}</em>.`);
   };
 
   const handleAddMedia = (files: FileList, folderId: string | null = null) => {
@@ -822,7 +859,14 @@ export default function PostitPage() {
       {stage === "connectInstagram" && <ConnectInstagramScreen onFinish={handleFinishOnboarding} />}
 
       {stage === "groups" && user && (
-        <GroupPicker user={user} groups={groups} onSelect={handleSelectGroup} onCreate={() => setCreatingGroup(true)} onSignOut={handleSignOut} />
+        <GroupPicker
+          user={user}
+          groups={groups}
+          onSelect={handleSelectGroup}
+          onCreate={() => setCreatingGroup(true)}
+          onSignOut={handleSignOut}
+          onDeleteGroup={handleDeleteGroup}
+        />
       )}
 
       {stage === "app" && user && activeGroup && (
@@ -868,6 +912,7 @@ export default function PostitPage() {
           onSetPosted={handleSetPosted}
           onSchedule={handleSchedule}
           onDropPhotoOnPost={handleDropPhotoOnPost}
+          onDeletePost={(postId) => handleDeletePost(activeGroup.id, postId)}
           onSendChat={(text) => handleSendChat(activeGroup.id, text)}
         />
       )}
@@ -985,12 +1030,14 @@ function GroupPicker({
   onSelect,
   onCreate,
   onSignOut,
+  onDeleteGroup,
 }: {
   user: CurrentUser;
   groups: Group[];
   onSelect: (id: string) => void;
   onCreate: () => void;
   onSignOut: () => void;
+  onDeleteGroup: (id: string) => void;
 }) {
   const first = user.name.trim().split(/\s+/)[0] || user.name;
   return (
@@ -1014,25 +1061,42 @@ function GroupPicker({
           {groups.length} {groups.length === 1 ? "group" : "groups"}
         </p>
         <div className={styles.groupList}>
-          {groups.map((g) => (
-            <button key={g.id} className={styles.groupCard} onClick={() => onSelect(g.id)}>
-              <span className={styles.groupIcon} style={{ "--c": g.color } as CSSProperties}>
-                {initials(g.name)}
-              </span>
-              <span className={styles.groupInfo}>
-                <b>{g.name}</b>
-                <span className={styles.handle}>{primaryHandle(g)}</span>
-                <span className={styles.groupStats}>
-                  {g.members.length} {g.members.length === 1 ? "person" : "people"} · {g.posts.length} {g.posts.length === 1 ? "post" : "posts"}
-                </span>
-              </span>
-              <span className={styles.groupDots}>
-                {g.members.map((m) => (
-                  <Dot key={m.id} color={m.color} />
-                ))}
-              </span>
-            </button>
-          ))}
+          {groups.map((g) => {
+            const canDelete = isMasterAdmin(user) || g.members.find((m) => m.id === user.id)?.role === "admin";
+            return (
+              <div key={g.id} className={styles.cardWrap}>
+                <button className={styles.groupCard} onClick={() => onSelect(g.id)}>
+                  <span className={styles.groupIcon} style={{ "--c": g.color } as CSSProperties}>
+                    {initials(g.name)}
+                  </span>
+                  <span className={styles.groupInfo}>
+                    <b>{g.name}</b>
+                    <span className={styles.handle}>{primaryHandle(g)}</span>
+                    <span className={styles.groupStats}>
+                      {g.members.length} {g.members.length === 1 ? "person" : "people"} · {g.posts.length} {g.posts.length === 1 ? "post" : "posts"}
+                    </span>
+                  </span>
+                  <span className={styles.groupDots}>
+                    {g.members.map((m) => (
+                      <Dot key={m.id} color={m.color} />
+                    ))}
+                  </span>
+                </button>
+                {canDelete && (
+                  <button
+                    className={styles.cardDelete}
+                    title="Delete group"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Delete "${g.name}"? This can't be undone.`)) onDeleteGroup(g.id);
+                    }}
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
           <button className={`${styles.groupCard} ${styles.groupNew}`} onClick={onCreate}>
             <Icon name="plus" size={18} /> Create a group
           </button>
@@ -1375,6 +1439,7 @@ function AppShell({
   onSetPosted,
   onSchedule,
   onDropPhotoOnPost,
+  onDeletePost,
   onSendChat,
 }: {
   user: CurrentUser;
@@ -1403,13 +1468,57 @@ function AppShell({
   onSetPosted: (postId: string, posted: boolean) => void;
   onSchedule: (postId: string, scheduledFor: number) => void;
   onDropPhotoOnPost: (postId: string, photoId: string) => void;
+  onDeletePost: (postId: string) => void;
   onSendChat: (text: string) => void;
 }) {
   const members = group.members;
   const first = user.name.trim().split(/\s+/)[0] || user.name;
   const activePost = group.posts.find((p) => p.id === activePostId) ?? null;
-  const isAdmin = group.members.find((m) => m.id === user.id)?.role === "admin";
+  const isAdmin = isMasterAdmin(user) || group.members.find((m) => m.id === user.id)?.role === "admin";
   const canPost = group.instagramAccounts.length > 0;
+
+  const [cursors, setCursors] = useState<Record<string, { x: number; y: number; color: string; name: string }>>({});
+  const lastCursorSent = useRef(0);
+
+  const cursorSocket = usePartySocket({
+    host: process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:8788",
+    party: "postit",
+    room: group.id,
+    enabled: liveCursors,
+    onOpen() {
+      cursorSocket.send(JSON.stringify({ type: "join", name: user.name, color: user.color }));
+    },
+    onMessage(event) {
+      const msg: PostitServerMessage = JSON.parse(event.data);
+      if (msg.type === "presence") {
+        const ids = new Set(msg.players.map((p) => p.id));
+        setCursors((prev) => {
+          const next: typeof prev = {};
+          for (const [id, c] of Object.entries(prev)) if (ids.has(id)) next[id] = c;
+          return next;
+        });
+      } else if (msg.type === "cursor") {
+        setCursors((prev) => ({ ...prev, [msg.playerId]: { x: msg.x, y: msg.y, color: msg.color, name: msg.name } }));
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (!liveCursors) return;
+    const handleMove = (e: MouseEvent) => {
+      const now = Date.now();
+      if (now - lastCursorSent.current < 40) return;
+      lastCursorSent.current = now;
+      cursorSocket.send(JSON.stringify({ type: "cursor", x: e.clientX, y: e.clientY }));
+    };
+    window.addEventListener("mousemove", handleMove);
+    return () => window.removeEventListener("mousemove", handleMove);
+  }, [liveCursors, cursorSocket]);
+
+  const handleToggleLiveCursors = () => {
+    if (liveCursors) setCursors({});
+    onToggleLiveCursors();
+  };
 
   return (
     <div className={styles.shell}>
@@ -1475,6 +1584,11 @@ function AppShell({
             <div className={styles.menu}>
               <div className={styles.mh}>{user.name}</div>
               <button onClick={onSwitchGroup}>Switch group</button>
+              <button onClick={handleToggleLiveCursors}>
+                <Icon name="cursor" size={14} />
+                Live cursors
+                <small>{liveCursors ? "On" : "Off"}</small>
+              </button>
               <hr />
               <button onClick={onSignOut}>Sign out</button>
             </div>
@@ -1509,10 +1623,28 @@ function AppShell({
 
         <main className={styles.main}>
           {screen === "posts" && (
-            <PostsGrid group={group} members={members} view="active" onOpenPost={onOpenPost} onNewPost={onNewPost} onDropPhoto={onDropPhotoOnPost} />
+            <PostsGrid
+              group={group}
+              members={members}
+              view="active"
+              isAdmin={isAdmin}
+              onOpenPost={onOpenPost}
+              onNewPost={onNewPost}
+              onDropPhoto={onDropPhotoOnPost}
+              onDeletePost={onDeletePost}
+            />
           )}
           {screen === "posted" && (
-            <PostsGrid group={group} members={members} view="posted" onOpenPost={onOpenPost} onNewPost={onNewPost} onDropPhoto={onDropPhotoOnPost} />
+            <PostsGrid
+              group={group}
+              members={members}
+              view="posted"
+              isAdmin={isAdmin}
+              onOpenPost={onOpenPost}
+              onNewPost={onNewPost}
+              onDropPhoto={onDropPhotoOnPost}
+              onDeletePost={onDeletePost}
+            />
           )}
           {screen === "activity" && <ActivityPanel group={group} />}
           {screen === "media" && (
@@ -1532,8 +1664,6 @@ function AppShell({
               me={user}
               isAdmin={isAdmin}
               canPost={canPost}
-              liveCursors={liveCursors}
-              onToggleLiveCursors={onToggleLiveCursors}
               onAddMedia={onAddMedia}
               onUpdateDraft={(fn) => onUpdateDraft(activePost.id, fn)}
               onSetPosted={(posted) => onSetPosted(activePost.id, posted)}
@@ -1546,6 +1676,21 @@ function AppShell({
       </div>
 
       <ChatBubble key={group.id} group={group} meId={user.id} onSend={onSendChat} />
+
+      {liveCursors && (
+        <div className={styles.cursorLayer}>
+          {Object.entries(cursors).map(([id, c]) => (
+            <div key={id} className={styles.remoteCursor} style={{ left: c.x, top: c.y }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={c.color} stroke="#fff" strokeWidth={1.2}>
+                <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
+              </svg>
+              <span className={styles.remoteCursorLabel} style={{ background: c.color }}>
+                {c.name}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1674,16 +1819,20 @@ function PostsGrid({
   group,
   members,
   view,
+  isAdmin,
   onOpenPost,
   onNewPost,
   onDropPhoto,
+  onDeletePost,
 }: {
   group: Group;
   members: Member[];
   view: "active" | "posted";
+  isAdmin: boolean;
   onOpenPost: (id: string) => void;
   onNewPost: () => void;
   onDropPhoto: (postId: string, photoId: string) => void;
+  onDeletePost: (postId: string) => void;
 }) {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const posts = group.posts.filter((p) => (view === "posted" ? p.posted : !p.posted));
@@ -1705,8 +1854,8 @@ function PostsGrid({
             const slidePhotos = post.draft.slideIds.map((id) => mediaById.get(id)).filter((p): p is Photo => !!p);
             const cover: (Photo | null)[] = [0, 1, 2].map((i) => slidePhotos[i] ?? null);
             return (
+              <div key={post.id} className={styles.cardWrap}>
               <button
-                key={post.id}
                 className={`${styles.pc} ${dragOverId === post.id ? styles.pcDrop : ""}`}
                 onClick={() => onOpenPost(post.id)}
                 onDragOver={(e) => {
@@ -1754,6 +1903,19 @@ function PostsGrid({
                   </span>
                 </span>
               </button>
+              {isAdmin && (
+                <button
+                  className={styles.cardDelete}
+                  title="Delete post"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete "${post.name}"? This can't be undone.`)) onDeletePost(post.id);
+                  }}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              )}
+              </div>
             );
           })}
           {view === "active" && (
@@ -1773,8 +1935,6 @@ function PostDetail({
   me,
   isAdmin,
   canPost,
-  liveCursors,
-  onToggleLiveCursors,
   onAddMedia,
   onUpdateDraft,
   onSetPosted,
@@ -1787,8 +1947,6 @@ function PostDetail({
   me: CurrentUser;
   isAdmin: boolean;
   canPost: boolean;
-  liveCursors: boolean;
-  onToggleLiveCursors: () => void;
   onAddMedia: (files: FileList, folderId?: string | null) => void;
   onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
   onSetPosted: (posted: boolean) => void;
@@ -1798,54 +1956,11 @@ function PostDetail({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [slidesDragOver, setSlidesDragOver] = useState(false);
+  const [dragOverSlideId, setDragOverSlideId] = useState<string | null>(null);
   const [finalizeOpen, setFinalizeOpen] = useState(false);
   const voterKey = me.id;
   const members = group.members;
   const threshold = Math.max(1, Math.ceil(members.length / 2));
-
-  const [cursors, setCursors] = useState<Record<string, { x: number; y: number; color: string; name: string }>>({});
-  const lastCursorSent = useRef(0);
-  const roomId = `${group.id}:${post.id}`;
-
-  const socket = usePartySocket({
-    host: process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:8788",
-    party: "postit",
-    room: roomId,
-    enabled: liveCursors,
-    onOpen() {
-      socket.send(JSON.stringify({ type: "join", name: me.name, color: me.color }));
-    },
-    onMessage(event) {
-      const msg: PostitServerMessage = JSON.parse(event.data);
-      if (msg.type === "presence") {
-        const ids = new Set(msg.players.map((p) => p.id));
-        setCursors((prev) => {
-          const next: typeof prev = {};
-          for (const [id, c] of Object.entries(prev)) if (ids.has(id)) next[id] = c;
-          return next;
-        });
-      } else if (msg.type === "cursor") {
-        setCursors((prev) => ({ ...prev, [msg.playerId]: { x: msg.x, y: msg.y, color: msg.color, name: msg.name } }));
-      }
-    },
-  });
-
-  useEffect(() => {
-    if (!liveCursors) return;
-    const handleMove = (e: MouseEvent) => {
-      const now = Date.now();
-      if (now - lastCursorSent.current < 40) return;
-      lastCursorSent.current = now;
-      socket.send(JSON.stringify({ type: "cursor", x: e.clientX, y: e.clientY }));
-    };
-    window.addEventListener("mousemove", handleMove);
-    return () => window.removeEventListener("mousemove", handleMove);
-  }, [liveCursors, socket]);
-
-  const handleToggleLiveCursors = () => {
-    if (liveCursors) setCursors({});
-    onToggleLiveCursors();
-  };
 
   const pool = groupMediaPool(group);
   const mediaById = new Map(pool.map((p) => [p.id, p]));
@@ -1854,6 +1969,18 @@ function PostDetail({
   const slides = slideIds.map((id) => mediaById.get(id)).filter((p): p is Photo => !!p);
 
   const removeSlide = (id: string) => onUpdateDraft((draft) => ({ ...draft, slideIds: draft.slideIds.filter((x) => x !== id) }));
+
+  const moveSlideBefore = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    onUpdateDraft((draft) => {
+      if (!draft.slideIds.includes(draggedId)) return draft;
+      const ids = draft.slideIds.filter((id) => id !== draggedId);
+      const targetIndex = ids.indexOf(targetId);
+      if (targetIndex === -1) return draft;
+      ids.splice(targetIndex, 0, draggedId);
+      return { ...draft, slideIds: ids };
+    });
+  };
 
   const setVote = (photoId: string, voter: string, vote: Vote) => {
     onUpdateDraft((draft) => {
@@ -1899,13 +2026,6 @@ function PostDetail({
               <Icon name="send" size={14} /> Preview &amp; finalize
             </button>
           )}
-          <button
-            className={`${styles.btnGhost2} ${liveCursors ? styles.liveCursorsOn : ""}`}
-            onClick={handleToggleLiveCursors}
-            title={liveCursors ? "Hide teammates' live cursors" : "Show teammates' live cursors"}
-          >
-            <Icon name="cursor" size={13} /> Live cursors {liveCursors ? "on" : "off"}
-          </button>
         </div>
         {!canPost && !post.posted && (
           <button type="button" className={styles.linkIgHint} onClick={onOpenInstagram}>
@@ -1997,7 +2117,28 @@ function PostDetail({
                 const downs = Object.values(voteMap).filter((v) => v === "down").length;
                 const isIn = ups >= threshold;
                 return (
-                  <div key={photo.id} className={styles.voteCard}>
+                  <div
+                    key={photo.id}
+                    className={`${styles.voteCard} ${dragOverSlideId === photo.id ? styles.voteCardDragOver : ""}`}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData("text/plain", photo.id)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverSlideId(photo.id);
+                    }}
+                    onDragLeave={() => setDragOverSlideId((id) => (id === photo.id ? null : id))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverSlideId(null);
+                      setSlidesDragOver(false);
+                      const draggedId = e.dataTransfer.getData("text/plain");
+                      if (!draggedId || draggedId === photo.id) return;
+                      if (slideIds.includes(draggedId)) moveSlideBefore(draggedId, photo.id);
+                      else onDropPhoto(draggedId);
+                    }}
+                  >
                     <div className={`${styles.voteCardMedia} ${isIn ? styles.voteCardIn : ""}`}>
                       <PhotoThumb photo={photo} />
                       {isIn && <span className={styles.inBadge}>In</span>}
@@ -2056,21 +2197,6 @@ function PostDetail({
           onOpenInstagram={onOpenInstagram}
           onClose={() => setFinalizeOpen(false)}
         />
-      )}
-
-      {liveCursors && (
-        <div className={styles.cursorLayer}>
-          {Object.entries(cursors).map(([id, c]) => (
-            <div key={id} className={styles.remoteCursor} style={{ left: c.x, top: c.y }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill={c.color} stroke="#fff" strokeWidth={1.2}>
-                <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
-              </svg>
-              <span className={styles.remoteCursorLabel} style={{ background: c.color }}>
-                {c.name}
-              </span>
-            </div>
-          ))}
-        </div>
       )}
     </>
   );
