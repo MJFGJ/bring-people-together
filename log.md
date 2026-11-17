@@ -261,4 +261,68 @@ Didn’t think she would like basketball as much as she does now until I started
 
  
 
+2026-11-16
+
+- **User Testing round 2 (5people)**
+- **Alex Kramer**
+
+Questions/Steps: 
+
+Find out what this post will look like on instagram
+Now show it on the grid- how easy was it to find that and is anything confusing about it? 
+How many photos still need votes? 
+Upload media 
+Try to finalize a post
+Post it to instagram
+
+
+Melanie: 
+
+Found the preview pretty fast
+Button between grid and post was a little small - didn’t find at first 
+She did not look at the buttons showing the votes needed
+She said it would help if they matched with the tag over the photos below (Green, yellow, red color).
+Media button was very easy to use
+Struggled to find finalize post to start. She clicked on the photo first, then went back out and I had to tell her where to find the button. 
+Once she clicked on the button she said it was easy to post. 
+She said that if the button was a different shape and on the left it might be easier to find. 
+
+Mark: 
+
+Easily found the preview button
+Said the post/grid show pretty much everything he needed. 
+When looking for how many posts needed to be approved he found it after a second, but said that it would be better if they weren’t the same shape as the preview and finalize button. 
+Found the finalize post button fairly fast. Said that preview and finalize post could be incorporated into one button possibly. 
+Said there was white space and didn’t like how you had to scroll. 
+Uploading the media was very easy as well - no problems
+
+Jesse: 
+
+Preview button was easy to find no problems there 
+Thought the grid and post button could also be bigger. 
+Had a good point about the music for the post. You can add music to a post in instagram but there isn’t a way to do that here. 
+*Should check into other stuff that is on instagram to make a post (maybe location)*
+Finalize post was pretty easy but struggle with the approving before the finalize. 
+Uploading media was not a problem, but said it would make sense to put it closer to the actual media. 
+Had no problem with posting and liked that there was an “Are you sure” button. 
+
+Andrew: 
+
+Took a second to find the preview button but he was looking on the wrong side of the screen. 
+Thought the actual preview could be bigger. 
+Had no problem seeing how many photos still needed a vote and liked the color coordination with the dots 
+Found the finalize post button easily 
+Thought there could be a little more information on the side of the post. 
+Easy to post 
+
+
+Sara: 
+
+Found the preview button right away and said it was good showing the picture. 
+Took a second to find the button to switch to grid. She was looking at the bottom. 
+Very easy to find how many photos needed votes - no problems there 
+Thought the upload media button was a little small and in a bit of an odd spot. I asked her if a drag option would be better and she said she would like that a lot more. 
+It was confusing to her about the approvals before finalizing and what that meant, but once I walked her through it she finalized and posted it very quickly. 
+Also thought there was a lot of white space on the finalize part. 
+Mentioned adding a spot for quick cropping and resizing before you post. 
 
