@@ -1,28 +1,31 @@
 "use client";
 
-import { useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { usePartySocket } from "partysocket/react";
 import styles from "./postit.module.css";
+import type { PostitServerMessage } from "@/lib/postitRealtimeTypes";
 
-type PersonId = "maya" | "jordan" | "sam" | "lena" | "theo";
+type Role = "admin" | "member";
 
 interface Person {
-  id: PersonId;
+  id: string;
   name: string;
   first: string;
-  role: string;
+  email: string;
+  username: string;
   color: string;
   fg: string;
 }
 
 const PEOPLE: Person[] = [
-  { id: "maya", name: "Maya Chen", first: "Maya", role: "Director", color: "#E4572E", fg: "#fff" },
-  { id: "jordan", name: "Jordan Reyes", first: "Jordan", role: "Photographer", color: "#2F6FEB", fg: "#fff" },
-  { id: "sam", name: "Sam Okafor", first: "Sam", role: "Videographer", color: "#13A06B", fg: "#fff" },
-  { id: "lena", name: "Lena Park", first: "Lena", role: "Model", color: "#8B5CF6", fg: "#fff" },
-  { id: "theo", name: "Theo Brooks", first: "Theo", role: "Brand rep", color: "#E3A008", fg: "#1F1604" },
+  { id: "maya", name: "Maya Chen", first: "Maya", email: "maya@crew.co", username: "@maya.chen", color: "#E4572E", fg: "#fff" },
+  { id: "jordan", name: "Jordan Reyes", first: "Jordan", email: "jordan@crew.co", username: "@jordan.reyes", color: "#2F6FEB", fg: "#fff" },
+  { id: "sam", name: "Sam Okafor", first: "Sam", email: "sam@crew.co", username: "@sam.okafor", color: "#13A06B", fg: "#fff" },
+  { id: "lena", name: "Lena Park", first: "Lena", email: "lena@crew.co", username: "@lena.park", color: "#8B5CF6", fg: "#fff" },
+  { id: "theo", name: "Theo Brooks", first: "Theo", email: "theo@crew.co", username: "@theo.brooks", color: "#E3A008", fg: "#1F1604" },
 ];
 
-const byId = (id: PersonId) => PEOPLE.find((p) => p.id === id)!;
+const byId = (id: string) => PEOPLE.find((p) => p.id === id)!;
 const initials = (name: string) =>
   name
     .trim()
@@ -61,61 +64,84 @@ interface Photo {
   tone: number;
   uploadedBy: string;
   at: number;
+  folderId: string | null;
 }
 
 type Vote = "up" | "down";
 
-interface Post {
+interface Draft {
   slideIds: string[];
   caption: string;
   votes: Record<string, Record<string, Vote>>;
 }
 
-interface ProjectCard {
+interface PostCard {
   id: string;
   name: string;
   date: string;
-  photos: Photo[];
   drafts: number;
   ready: number;
   pending: number;
-  post: Post;
+  draft: Draft;
   posted: boolean;
   postedAt: number | null;
   requested: boolean;
 }
 
-interface GroupPhoto {
-  photo: Photo;
-  projectId: string;
-  projectName: string;
-}
-
-function groupPhotoPool(group: Group): GroupPhoto[] {
-  const pool: GroupPhoto[] = [];
-  for (const p of group.projects) for (const photo of p.photos) pool.push({ photo, projectId: p.id, projectName: p.name });
-  return pool.sort((a, b) => b.photo.at - a.photo.at);
+function groupMediaPool(group: Group): Photo[] {
+  return [...group.media].sort((a, b) => b.at - a.at);
 }
 
 interface Member {
   id: string;
   name: string;
-  role: string;
+  email: string;
+  username: string;
+  role: Role;
   color: string;
   fg: string;
 }
 
-function memberFromPerson(id: PersonId): Member {
+function memberFromPerson(id: string, role: Role): Member {
   const p = byId(id);
-  return { id: p.id, name: p.name, role: p.role, color: p.color, fg: p.fg };
+  return { id: p.id, name: p.name, email: p.email, username: p.username, role, color: p.color, fg: p.fg };
 }
 
-function makeMember(name: string, role: string): Member {
-  const id = `${slugify(name)}-${Math.random().toString(36).slice(2, 7)}`;
-  return { id, name, role: role.trim() || "Member", color: hashColor(name + role), fg: "#fff" };
+function isValidIdentifier(s: string): boolean {
+  const t = s.trim();
+  if (!t) return false;
+  if (t.startsWith("@")) return t.length > 1;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
-const ROLE_OPTIONS = ["Director", "Photographer", "Videographer", "Model", "Editor", "Brand rep", "Social manager"];
+function nameFromIdentifier(identifier: string): string {
+  const t = identifier.trim();
+  const local = t.startsWith("@") ? t.slice(1) : t.split("@")[0];
+  const spaced = local.replace(/[._-]+/g, " ").trim();
+  return spaced ? spaced.replace(/\b\w/g, (c) => c.toUpperCase()) : t;
+}
+
+function makeMember(identifier: string, role: Role): Member {
+  const t = identifier.trim();
+  const isUsername = t.startsWith("@");
+  const id = `${slugify(t)}-${Math.random().toString(36).slice(2, 7)}`;
+  return {
+    id,
+    name: nameFromIdentifier(t),
+    email: isUsername ? "" : t,
+    username: isUsername ? t : "",
+    role,
+    color: hashColor(t),
+    fg: "#fff",
+  };
+}
+
+function findKnownContact(identifier: string, contacts: Member[]): Member | undefined {
+  const t = identifier.trim().toLowerCase();
+  if (!t) return undefined;
+  const bare = t.replace(/^@/, "");
+  return contacts.find((c) => (c.email && c.email.toLowerCase() === t) || (c.username && c.username.toLowerCase().replace(/^@/, "") === bare));
+}
 
 interface ChatMessage {
   id: string;
@@ -138,18 +164,34 @@ interface ActivityItem {
   icon: keyof typeof ICON_PATHS;
 }
 
+interface InstagramAccount {
+  id: string;
+  handle: string;
+}
+
+interface MediaFolder {
+  id: string;
+  name: string;
+}
+
 interface Group {
   id: string;
   name: string;
-  account: string;
   color: string;
   members: Member[];
-  projects: ProjectCard[];
+  instagramAccounts: InstagramAccount[];
+  media: Photo[];
+  folders: MediaFolder[];
+  posts: PostCard[];
   chat: ChatMessage[];
   activity: ActivityItem[];
 }
 
-function makeSeedPhotos(count: number, members: PersonId[], startAgoMin: number): Photo[] {
+function primaryHandle(group: Group): string {
+  return group.instagramAccounts[0]?.handle ?? "Not linked";
+}
+
+function makeSeedPhotos(count: number, members: string[], startAgoMin: number): Photo[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `seed-${startAgoMin}-${i}`,
     name: `IMG_${1000 + i}.jpg`,
@@ -157,6 +199,7 @@ function makeSeedPhotos(count: number, members: PersonId[], startAgoMin: number)
     tone: (i * 37 + 20) % 80 + 10,
     uploadedBy: members.length ? byId(members[i % members.length]).name : "Team",
     at: Date.now() - (startAgoMin - i) * 60000,
+    folderId: null,
   }));
 }
 
@@ -170,19 +213,20 @@ function makeInitialGroups(): Group[] {
     {
       id: "ribbonclub",
       name: "Ribbon Club",
-      account: "@ribbonclub",
       color: "#E4572E",
-      members: (["jordan", "lena", "maya"] as PersonId[]).map(memberFromPerson),
-      projects: [
+      members: [memberFromPerson("jordan", "admin"), memberFromPerson("lena", "member"), memberFromPerson("maya", "member")],
+      instagramAccounts: [{ id: "ig-ribbonclub", handle: "@ribbonclub" }],
+      media: lookbookPhotos,
+      folders: [],
+      posts: [
         {
           id: "p1",
           name: "Lookbook Shoot",
           date: "Shot Nov 8",
-          photos: lookbookPhotos,
           drafts: 3,
           ready: 1,
           pending: 2,
-          post: {
+          draft: {
             slideIds: [lookbookPhotos[0].id, lookbookPhotos[3].id, lookbookPhotos[5].id],
             caption: "New drop for the holidays. #RibbonClub",
             votes: {
@@ -203,25 +247,26 @@ function makeInitialGroups(): Group[] {
       ],
       activity: [
         { id: "a1", at: Date.now() - 55 * 60000, actorName: "Jordan Reyes", color: "#2F6FEB", fg: "#fff", verb: "added 13 photos to", target: "Lookbook Shoot", icon: "image" },
-        { id: "a2", at: Date.now() - 95 * 60000, actorName: "Maya Chen", color: "#E4572E", fg: "#fff", verb: "created the project", target: "Lookbook Shoot", icon: "folder" },
+        { id: "a2", at: Date.now() - 95 * 60000, actorName: "Maya Chen", color: "#E4572E", fg: "#fff", verb: "created the post", target: "Lookbook Shoot", icon: "folder" },
       ],
     },
     {
       id: "riverfront",
       name: "Riverfront Café",
-      account: "@riverfrontcafe",
       color: "#2F6FEB",
-      members: (["maya", "sam"] as PersonId[]).map(memberFromPerson),
-      projects: [
+      members: [memberFromPerson("maya", "admin"), memberFromPerson("sam", "member")],
+      instagramAccounts: [{ id: "ig-riverfront", handle: "@riverfrontcafe" }],
+      media: cafePhotos,
+      folders: [],
+      posts: [
         {
           id: "p2",
           name: "Café Opening",
           date: "Shot Nov 2",
-          photos: cafePhotos,
           drafts: 1,
           ready: 1,
           pending: 0,
-          post: { slideIds: [cafePhotos[1].id], caption: "We're open! First latte is on us this weekend.", votes: { [cafePhotos[1].id]: { maya: "up", sam: "up" } } },
+          draft: { slideIds: [cafePhotos[1].id], caption: "We're open! First latte is on us this weekend.", votes: { [cafePhotos[1].id]: { maya: "up", sam: "up" } } },
           posted: true,
           postedAt: Date.now() - 2 * 24 * 60 * 60000,
           requested: false,
@@ -234,38 +279,39 @@ function makeInitialGroups(): Group[] {
       activity: [
         { id: "a1", at: Date.now() - 2 * 24 * 60 * 60000, actorName: "Maya Chen", color: "#E4572E", fg: "#fff", verb: "marked Café Opening as posted", icon: "check" },
         { id: "a2", at: Date.now() - 3 * 24 * 60 * 60000, actorName: "Sam Okafor", color: "#13A06B", fg: "#fff", verb: "added 9 photos to", target: "Café Opening", icon: "image" },
-        { id: "a3", at: Date.now() - 3 * 24 * 60 * 60000 - 40 * 60000, actorName: "Maya Chen", color: "#E4572E", fg: "#fff", verb: "created the project", target: "Café Opening", icon: "folder" },
+        { id: "a3", at: Date.now() - 3 * 24 * 60 * 60000 - 40 * 60000, actorName: "Maya Chen", color: "#E4572E", fg: "#fff", verb: "created the post", target: "Café Opening", icon: "folder" },
       ],
     },
     {
       id: "studio",
       name: "Postit Studio",
-      account: "@postit.studio",
       color: "#13A06B",
-      members: (["sam", "lena", "jordan", "theo"] as PersonId[]).map(memberFromPerson),
-      projects: [
+      members: [memberFromPerson("sam", "admin"), memberFromPerson("lena", "member"), memberFromPerson("jordan", "member"), memberFromPerson("theo", "member")],
+      instagramAccounts: [],
+      media: btsPhotos,
+      folders: [],
+      posts: [
         {
           id: "p3",
           name: "Studio BTS",
           date: "Ongoing",
-          photos: btsPhotos,
           drafts: 0,
           ready: 0,
           pending: 0,
-          post: { slideIds: [], caption: "", votes: {} },
+          draft: { slideIds: [], caption: "", votes: {} },
           posted: false,
           postedAt: null,
           requested: false,
         },
       ],
       chat: [],
-      activity: [{ id: "a1", at: Date.now() - 20 * 60000, actorName: "Sam Okafor", color: "#13A06B", fg: "#fff", verb: "created the project", target: "Studio BTS", icon: "folder" }],
+      activity: [{ id: "a1", at: Date.now() - 20 * 60000, actorName: "Sam Okafor", color: "#13A06B", fg: "#fff", verb: "created the post", target: "Studio BTS", icon: "folder" }],
     },
   ];
 }
 
 function revokeBlobUrls(groups: Group[]) {
-  for (const g of groups) for (const p of g.projects) for (const ph of p.photos) if (ph.url?.startsWith("blob:")) URL.revokeObjectURL(ph.url);
+  for (const g of groups) for (const ph of g.media) if (ph.url?.startsWith("blob:")) URL.revokeObjectURL(ph.url);
 }
 
 const slugify = (s: string) =>
@@ -298,6 +344,8 @@ const ICON_PATHS = {
   r: '<path d="m9 18 6-6-6-6"/>',
   up: '<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
   down: '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
+  instagram: '<rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>',
+  cursor: '<path d="M4 4l7.07 17 2.51-7.39L21 11.07z"/>',
 } as const;
 
 function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: number }) {
@@ -350,11 +398,13 @@ interface Toast {
 interface CurrentUser {
   name: string;
   email: string;
+  username: string;
+  instagram?: string;
   color: string;
 }
 
-type Stage = "login" | "groups" | "app";
-type Screen = "projects" | "project" | "posted" | "chat" | "activity";
+type Stage = "signup" | "connectInstagram" | "groups" | "app";
+type Screen = "posts" | "post" | "posted" | "media" | "activity";
 
 let toastId = 0;
 
@@ -369,17 +419,35 @@ const CANNED_REPLIES = [
 ];
 
 export default function PostitPage() {
-  const [stage, setStage] = useState<Stage>("login");
+  const [stage, setStage] = useState<Stage>("signup");
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [groups, setGroups] = useState<Group[]>(makeInitialGroups);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  const [screen, setScreen] = useState<Screen>("projects");
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [screen, setScreen] = useState<Screen>("posts");
+  const [activePostId, setActivePostId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
-  const [creatingProject, setCreatingProject] = useState(false);
+  const [creatingPost, setCreatingPost] = useState(false);
   const [invitingTeam, setInvitingTeam] = useState(false);
+  const [linkingInstagram, setLinkingInstagram] = useState(false);
+  const [liveCursors, setLiveCursors] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("postit-live-cursors");
+    if (stored !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLiveCursors(stored !== "0");
+    }
+  }, []);
+
+  const toggleLiveCursors = () => {
+    setLiveCursors((v) => {
+      const next = !v;
+      window.localStorage.setItem("postit-live-cursors", next ? "1" : "0");
+      return next;
+    });
+  };
 
   const pushToast = (text: string) => {
     const id = ++toastId;
@@ -396,81 +464,135 @@ export default function PostitPage() {
     }));
   };
 
-  const handleSignIn = (name: string, email: string) => {
-    setUser({ name, email, color: hashColor(email || name) });
+  const handleSignUp = (name: string, email: string, username: string) => {
+    setUser({ name, email, username: normalizeHandle(username) || `@${slugify(name)}`, color: hashColor(email || name) });
+    setStage("connectInstagram");
+  };
+
+  const handleFinishOnboarding = (instagram?: string) => {
+    setUser((u) => (u ? { ...u, instagram } : u));
     setStage("groups");
-    pushToast(`Signed in as <em>${name}</em>. Pick a group to get started.`);
+    pushToast(instagram ? `Linked <em>${instagram}</em>. Pick a group to get started.` : "Pick a group to get started.");
+  };
+
+  const ensureMembership = (groupId: string) => {
+    if (!user) return;
+    setGroups((gs) =>
+      gs.map((g) => {
+        if (g.id !== groupId) return g;
+        if (g.members.some((m) => m.email && m.email === user.email)) return g;
+        const me: Member = { id: `me-${slugify(user.email || user.name)}`, name: user.name, email: user.email, username: user.username, role: "member", color: user.color, fg: "#fff" };
+        return { ...g, members: [...g.members, me] };
+      })
+    );
   };
 
   const handleSelectGroup = (id: string) => {
+    ensureMembership(id);
     setActiveGroupId(id);
-    setScreen("projects");
-    setActiveProjectId(null);
+    setScreen("posts");
+    setActivePostId(null);
     setStage("app");
     setMenuOpen(false);
   };
 
-  const handleCreateGroup = (name: string, accountInput: string, invitees: Member[]) => {
+  const handleCreateGroup = (name: string, invitees: Member[], instagramAccounts: InstagramAccount[]) => {
+    if (!user) return;
     const id = `${slugify(name)}-${Date.now().toString(36)}`;
-    const account = normalizeHandle(accountInput) || `@${slugify(name)}`;
     const color = GROUP_COLORS[groups.length % GROUP_COLORS.length];
-    const group: Group = { id, name, account, color, members: invitees, projects: [], chat: [], activity: [] };
+    const me: Member = { id: `me-${slugify(user.email || user.name)}`, name: user.name, email: user.email, username: user.username, role: "admin", color: user.color, fg: "#fff" };
+    const members = [me, ...invitees];
+    const group: Group = { id, name, color, members, instagramAccounts, media: [], folders: [], posts: [], chat: [], activity: [] };
     setGroups((g) => [...g, group]);
     setActiveGroupId(id);
-    setScreen("projects");
-    setActiveProjectId(null);
+    setScreen("posts");
+    setActivePostId(null);
     setStage("app");
     setCreatingGroup(false);
     for (const m of invitees) {
-      pushActivity(id, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: `invited ${m.name} as ${m.role} to`, target: name, icon: "plus" });
+      pushActivity(id, { actorName: user.name, color: user.color, fg: "#fff", verb: `invited ${m.name} as ${m.role === "admin" ? "an admin" : "a team member"} to`, target: name, icon: "plus" });
     }
-    pushToast(`Created <em>${name}</em>${invitees.length ? ` with ${invitees.length} teammate${invitees.length === 1 ? "" : "s"}` : ""}. Start a project when you're ready.`);
+    if (instagramAccounts.length) {
+      pushActivity(id, { actorName: user.name, color: user.color, fg: "#fff", verb: `linked ${instagramAccounts.map((a) => a.handle).join(", ")} to`, target: name, icon: "instagram" });
+    }
+    pushToast(
+      `Created <em>${name}</em>${invitees.length ? ` with ${invitees.length} teammate${invitees.length === 1 ? "" : "s"}` : ""}.${
+        instagramAccounts.length ? "" : " Link an Instagram account before you post."
+      }`
+    );
   };
 
   const handleSaveMembers = (groupId: string, nextMembers: Member[]) => {
     const group = groups.find((g) => g.id === groupId);
     if (!group) return;
+    let members = nextMembers;
+    if (members.length && !members.some((m) => m.role === "admin")) {
+      members = members.map((m, i) => (i === 0 ? { ...m, role: "admin" } : m));
+    }
     const prevIds = new Set(group.members.map((m) => m.id));
-    const nextIds = new Set(nextMembers.map((m) => m.id));
-    const added = nextMembers.filter((m) => !prevIds.has(m.id));
+    const nextIds = new Set(members.map((m) => m.id));
+    const added = members.filter((m) => !prevIds.has(m.id));
     const removed = group.members.filter((m) => !nextIds.has(m.id));
-    updateGroup(groupId, (g) => ({ ...g, members: nextMembers }));
+    updateGroup(groupId, (g) => ({ ...g, members }));
     for (const m of added) {
-      pushActivity(groupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: `invited ${m.name} as ${m.role} to`, target: group.name, icon: "plus" });
+      pushActivity(groupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: `invited ${m.name} as ${m.role === "admin" ? "an admin" : "a team member"} to`, target: group.name, icon: "plus" });
     }
     for (const m of removed) {
       pushActivity(groupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: `removed ${m.name} from`, target: group.name, icon: "x" });
+    }
+    for (const m of members) {
+      const prev = group.members.find((p) => p.id === m.id);
+      if (prev && prevIds.has(m.id) && prev.role !== m.role) {
+        pushActivity(groupId, {
+          actorName: user?.name ?? "You",
+          color: user?.color ?? "#888",
+          fg: "#fff",
+          verb: `made ${m.name} ${m.role === "admin" ? "an admin" : "a team member"} in`,
+          target: group.name,
+          icon: "sliders",
+        });
+      }
     }
     setInvitingTeam(false);
     pushToast(added.length ? `Invited ${added.map((m) => m.name).join(", ")}.` : "Updated the team.");
   };
 
-  const handleCreateProject = (name: string, when: string) => {
+  const handleSaveInstagram = (groupId: string, accounts: InstagramAccount[]) => {
+    const group = groups.find((g) => g.id === groupId);
+    const grew = group ? accounts.length > group.instagramAccounts.length : false;
+    updateGroup(groupId, (g) => ({ ...g, instagramAccounts: accounts }));
+    setLinkingInstagram(false);
+    if (group && grew) {
+      pushActivity(groupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: "linked Instagram accounts for", target: group.name, icon: "instagram" });
+    }
+    pushToast(accounts.length ? "Instagram accounts updated." : "Removed all linked accounts.");
+  };
+
+  const handleCreatePost = (name: string, when: string) => {
     if (!activeGroupId) return;
     const id = `${slugify(name)}-${Date.now().toString(36)}`;
     const date = when.trim() || `Added ${formatToday()}`;
-    const project: ProjectCard = {
+    const post: PostCard = {
       id,
       name,
       date,
-      photos: [],
       drafts: 0,
       ready: 0,
       pending: 0,
-      post: { slideIds: [], caption: "", votes: {} },
+      draft: { slideIds: [], caption: "", votes: {} },
       posted: false,
       postedAt: null,
       requested: false,
     };
-    updateGroup(activeGroupId, (g) => ({ ...g, projects: [...g.projects, project] }));
-    pushActivity(activeGroupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: "created the project", target: name, icon: "folder" });
-    setActiveProjectId(id);
-    setScreen("project");
-    setCreatingProject(false);
+    updateGroup(activeGroupId, (g) => ({ ...g, posts: [...g.posts, post] }));
+    pushActivity(activeGroupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: "created the post", target: name, icon: "folder" });
+    setActivePostId(id);
+    setScreen("post");
+    setCreatingPost(false);
     pushToast(`Created <em>${name}</em>. Add some photos to get started.`);
   };
 
-  const handleAddPhotos = (projectId: string, files: FileList) => {
+  const handleAddMedia = (files: FileList, folderId: string | null = null) => {
     if (!activeGroupId || !user) return;
     const picked = Array.from(files).filter((f) => f.type.startsWith("image/"));
     if (!picked.length) return;
@@ -481,59 +603,77 @@ export default function PostitPage() {
       tone: (i * 29 + 13) % 85 + 8,
       uploadedBy: user.name,
       at: Date.now(),
+      folderId,
     }));
-    updateGroup(activeGroupId, (g) => ({
-      ...g,
-      projects: g.projects.map((p) => (p.id === projectId ? { ...p, photos: [...p.photos, ...newPhotos] } : p)),
-    }));
-    const projectName = groups.find((g) => g.id === activeGroupId)?.projects.find((p) => p.id === projectId)?.name;
+    updateGroup(activeGroupId, (g) => ({ ...g, media: [...g.media, ...newPhotos] }));
+    const groupName = groups.find((g) => g.id === activeGroupId)?.name;
     pushActivity(activeGroupId, {
       actorName: user.name,
       color: user.color,
       fg: "#fff",
       verb: `added ${newPhotos.length} ${newPhotos.length === 1 ? "photo" : "photos"} to`,
-      target: projectName,
+      target: groupName,
       icon: "image",
     });
     pushToast(`Added ${newPhotos.length} ${newPhotos.length === 1 ? "photo" : "photos"}.`);
   };
 
-  const handleUpdatePost = (projectId: string, fn: (post: Post) => Post) => {
+  const handleCreateFolder = (name: string) => {
+    if (!activeGroupId || !name.trim()) return;
+    const folder: MediaFolder = { id: `${slugify(name)}-${Date.now().toString(36)}`, name: name.trim() };
+    updateGroup(activeGroupId, (g) => ({ ...g, folders: [...g.folders, folder] }));
+  };
+
+  const handleDeleteFolder = (folderId: string) => {
     if (!activeGroupId) return;
     updateGroup(activeGroupId, (g) => ({
       ...g,
-      projects: g.projects.map((p) => (p.id === projectId ? { ...p, post: fn(p.post) } : p)),
+      folders: g.folders.filter((f) => f.id !== folderId),
+      media: g.media.map((m) => (m.folderId === folderId ? { ...m, folderId: null } : m)),
     }));
   };
 
-  const handleSetPosted = (projectId: string, posted: boolean) => {
+  const handleMoveToFolder = (photoId: string, folderId: string | null) => {
     if (!activeGroupId) return;
-    const projectName = groups.find((g) => g.id === activeGroupId)?.projects.find((p) => p.id === projectId)?.name ?? "a project";
+    updateGroup(activeGroupId, (g) => ({ ...g, media: g.media.map((m) => (m.id === photoId ? { ...m, folderId } : m)) }));
+  };
+
+  const handleUpdateDraft = (postId: string, fn: (draft: Draft) => Draft) => {
+    if (!activeGroupId) return;
     updateGroup(activeGroupId, (g) => ({
       ...g,
-      projects: g.projects.map((p) => (p.id === projectId ? { ...p, posted, postedAt: posted ? Date.now() : null, requested: false } : p)),
+      posts: g.posts.map((p) => (p.id === postId ? { ...p, draft: fn(p.draft) } : p)),
+    }));
+  };
+
+  const handleSetPosted = (postId: string, posted: boolean) => {
+    if (!activeGroupId) return;
+    const postName = groups.find((g) => g.id === activeGroupId)?.posts.find((p) => p.id === postId)?.name ?? "a post";
+    updateGroup(activeGroupId, (g) => ({
+      ...g,
+      posts: g.posts.map((p) => (p.id === postId ? { ...p, posted, postedAt: posted ? Date.now() : null, requested: false } : p)),
     }));
     pushActivity(activeGroupId, {
       actorName: user?.name ?? "You",
       color: user?.color ?? "#888",
       fg: "#fff",
-      verb: posted ? `marked ${projectName} as posted` : `moved ${projectName} back to drafts`,
+      verb: posted ? `marked ${postName} as posted` : `moved ${postName} back to drafts`,
       icon: posted ? "check" : "folder",
     });
   };
 
-  const handleRequestPost = (projectId: string, projectName: string) => {
+  const handleRequestPost = (postId: string, postName: string) => {
     if (!activeGroupId) return;
     updateGroup(activeGroupId, (g) => ({
       ...g,
-      projects: g.projects.map((p) => (p.id === projectId ? { ...p, requested: true } : p)),
+      posts: g.posts.map((p) => (p.id === postId ? { ...p, requested: true } : p)),
     }));
-    pushActivity(activeGroupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: "asked the group to approve", target: projectName, icon: "check" });
-    pushToast(`Asked the group to approve <em>${projectName}</em>.`);
+    pushActivity(activeGroupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: "asked an admin to approve", target: postName, icon: "check" });
+    pushToast(`Asked an admin to approve <em>${postName}</em>.`);
   };
 
-  const handleDropPhotoOnProject = (projectId: string, photoId: string) => {
-    handleUpdatePost(projectId, (post) => (post.slideIds.includes(photoId) ? post : { ...post, slideIds: [...post.slideIds, photoId] }));
+  const handleDropPhotoOnPost = (postId: string, photoId: string) => {
+    handleUpdateDraft(postId, (draft) => (draft.slideIds.includes(photoId) ? draft : { ...draft, slideIds: [...draft.slideIds, photoId] }));
   };
 
   const handleSendChat = (groupId: string, text: string) => {
@@ -555,33 +695,35 @@ export default function PostitPage() {
 
   const handleSwitchGroup = () => {
     setStage("groups");
-    setScreen("projects");
-    setActiveProjectId(null);
+    setScreen("posts");
+    setActivePostId(null);
     setMenuOpen(false);
     setInvitingTeam(false);
+    setLinkingInstagram(false);
   };
 
   const handleSignOut = () => {
     revokeBlobUrls(groups);
-    setStage("login");
+    setStage("signup");
     setUser(null);
     setActiveGroupId(null);
-    setScreen("projects");
-    setActiveProjectId(null);
+    setScreen("posts");
+    setActivePostId(null);
     setGroups(makeInitialGroups());
     setMenuOpen(false);
     setCreatingGroup(false);
-    setCreatingProject(false);
+    setCreatingPost(false);
     setInvitingTeam(false);
+    setLinkingInstagram(false);
   };
-
-  const notReady = (label: string) => pushToast(`${label} isn't part of this prototype yet.`);
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
 
   return (
     <div className={styles.page}>
-      {stage === "login" && <LoginScreen onSignIn={handleSignIn} />}
+      {stage === "signup" && <SignupScreen onSignUp={handleSignUp} />}
+
+      {stage === "connectInstagram" && <ConnectInstagramScreen onFinish={handleFinishOnboarding} />}
 
       {stage === "groups" && user && (
         <GroupPicker user={user} groups={groups} onSelect={handleSelectGroup} onCreate={() => setCreatingGroup(true)} onSignOut={handleSignOut} />
@@ -592,48 +734,55 @@ export default function PostitPage() {
           user={user}
           group={activeGroup}
           screen={screen}
-          activeProjectId={activeProjectId}
+          activePostId={activePostId}
           menuOpen={menuOpen}
+          liveCursors={liveCursors}
+          onToggleLiveCursors={toggleLiveCursors}
           onToggleMenu={() => setMenuOpen((v) => !v)}
           onSwitchGroup={handleSwitchGroup}
           onSignOut={handleSignOut}
-          onDm={(p) => notReady(`Messaging ${p.name.split(/\s+/)[0]}`)}
           onInvite={() => setInvitingTeam(true)}
-          onRail={(label) => notReady(label)}
-          onOpenProjects={() => {
-            setScreen("projects");
-            setActiveProjectId(null);
+          onOpenInstagram={() => setLinkingInstagram(true)}
+          onOpenPosts={() => {
+            setScreen("posts");
+            setActivePostId(null);
           }}
           onOpenPosted={() => {
             setScreen("posted");
-            setActiveProjectId(null);
-          }}
-          onOpenChat={() => {
-            setScreen("chat");
-            setActiveProjectId(null);
+            setActivePostId(null);
           }}
           onOpenActivity={() => {
             setScreen("activity");
-            setActiveProjectId(null);
+            setActivePostId(null);
           }}
-          onOpenProject={(id) => {
-            setActiveProjectId(id);
-            setScreen("project");
+          onOpenMedia={() => {
+            setScreen("media");
+            setActivePostId(null);
           }}
-          onNewProject={() => setCreatingProject(true)}
-          onAddPhotos={handleAddPhotos}
-          onUpdatePost={handleUpdatePost}
+          onOpenPost={(id) => {
+            setActivePostId(id);
+            setScreen("post");
+          }}
+          onNewPost={() => setCreatingPost(true)}
+          onAddMedia={handleAddMedia}
+          onCreateFolder={handleCreateFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onMoveToFolder={handleMoveToFolder}
+          onUpdateDraft={handleUpdateDraft}
           onSetPosted={handleSetPosted}
           onRequestPost={handleRequestPost}
-          onDropPhotoOnProject={handleDropPhotoOnProject}
+          onDropPhotoOnPost={handleDropPhotoOnPost}
           onSendChat={(text) => handleSendChat(activeGroup.id, text)}
         />
       )}
 
-      {creatingGroup && <CreateGroupModal onCreate={handleCreateGroup} onCancel={() => setCreatingGroup(false)} />}
-      {creatingProject && <CreateProjectModal onCreate={handleCreateProject} onCancel={() => setCreatingProject(false)} />}
+      {creatingGroup && <CreateGroupModal allGroups={groups} onCreate={handleCreateGroup} onCancel={() => setCreatingGroup(false)} />}
+      {creatingPost && <CreatePostModal onCreate={handleCreatePost} onCancel={() => setCreatingPost(false)} />}
       {invitingTeam && activeGroup && (
-        <InviteModal group={activeGroup} onSave={(members) => handleSaveMembers(activeGroup.id, members)} onCancel={() => setInvitingTeam(false)} />
+        <InviteModal group={activeGroup} allGroups={groups} onSave={(members) => handleSaveMembers(activeGroup.id, members)} onCancel={() => setInvitingTeam(false)} />
+      )}
+      {linkingInstagram && activeGroup && (
+        <InstagramModal group={activeGroup} onSave={(accounts) => handleSaveInstagram(activeGroup.id, accounts)} onCancel={() => setLinkingInstagram(false)} />
       )}
 
       <div className={styles.toastWrap}>
@@ -647,17 +796,18 @@ export default function PostitPage() {
   );
 }
 
-function LoginScreen({ onSignIn }: { onSignIn: (name: string, email: string) => void }) {
+function SignupScreen({ onSignUp }: { onSignUp: (name: string, email: string, username: string) => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  const canSubmit = name.trim().length > 0 && email.trim().length > 0 && password.length > 0;
+  const canSubmit = name.trim().length > 0 && email.trim().length > 0 && username.trim().length > 0 && password.length > 0;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onSignIn(name.trim(), email.trim());
+    onSignUp(name.trim(), email.trim(), username.trim());
   };
 
   return (
@@ -667,11 +817,11 @@ function LoginScreen({ onSignIn }: { onSignIn: (name: string, email: string) => 
           postit<i className={styles.wmDot} />
         </div>
         <p>One shared board for the whole shoot. Upload, credit, vote and build the post together.</p>
-        <p className={styles.proto}>Prototype for user testing — sign-in is simulated and nothing you type is sent anywhere.</p>
+        <p className={styles.proto}>Prototype for user testing — nothing you type is sent anywhere.</p>
       </div>
       <form className={styles.loginCard} onSubmit={submit}>
-        <h2>Sign in</h2>
-        <p className={styles.sub}>New here? These fields just set up your profile — nothing to verify yet.</p>
+        <h2>Create your account</h2>
+        <p className={styles.sub}>Set up your profile. Linking Instagram comes next, but it&rsquo;s optional — handy if your team uses postit at work.</p>
         <div className={styles.field}>
           <label htmlFor="name">Name</label>
           <input id="name" className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Jamie Rivera" autoComplete="name" />
@@ -689,6 +839,10 @@ function LoginScreen({ onSignIn }: { onSignIn: (name: string, email: string) => 
           />
         </div>
         <div className={styles.field}>
+          <label htmlFor="username">Username</label>
+          <input id="username" className={styles.input} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="@jamie.rivera" autoComplete="username" />
+        </div>
+        <div className={styles.field}>
           <label htmlFor="password">Password</label>
           <input
             id="password"
@@ -697,13 +851,43 @@ function LoginScreen({ onSignIn }: { onSignIn: (name: string, email: string) => 
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
-            autoComplete="current-password"
+            autoComplete="new-password"
           />
         </div>
         <button type="submit" className={styles.btnPrimary} disabled={!canSubmit}>
-          Sign in
+          Continue
         </button>
       </form>
+    </div>
+  );
+}
+
+function ConnectInstagramScreen({ onFinish }: { onFinish: (instagram?: string) => void }) {
+  const [handle, setHandle] = useState("");
+
+  return (
+    <div className={styles.loginWrap}>
+      <div className={styles.loginIntro}>
+        <div className={styles.wm}>
+          postit<i className={styles.wmDot} />
+        </div>
+        <p>Link your own Instagram if you&rsquo;d like your profile to show it.</p>
+        <p className={styles.proto}>postit is often used at work, so this step is never required.</p>
+      </div>
+      <div className={styles.loginCard}>
+        <h2>Link your Instagram</h2>
+        <p className={styles.sub}>Optional — you can always do this later from your profile.</p>
+        <div className={styles.field}>
+          <label htmlFor="ighandle">Your Instagram handle</label>
+          <input id="ighandle" className={styles.input} value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="@jamie.rivera" />
+        </div>
+        <button type="button" className={styles.btnPrimary} onClick={() => onFinish(normalizeHandle(handle) || undefined)} disabled={!handle.trim()}>
+          Link account
+        </button>
+        <button type="button" className={styles.skipLink} onClick={() => onFinish(undefined)}>
+          Skip for now
+        </button>
+      </div>
     </div>
   );
 }
@@ -728,7 +912,7 @@ function GroupPicker({
         <div className={styles.wm}>
           postit<i className={styles.wmDot} />
         </div>
-        <p>You can belong to more than one group. Each group posts to its own account and keeps its own projects.</p>
+        <p>You can belong to more than one group. Each group manages its own team and posts to its own linked Instagram accounts.</p>
         <p className={styles.proto}>
           Signed in as {user.name} · {user.email} ·{" "}
           <button className={styles.signOutLink} onClick={onSignOut}>
@@ -749,9 +933,9 @@ function GroupPicker({
               </span>
               <span className={styles.groupInfo}>
                 <b>{g.name}</b>
-                <span className={styles.handle}>{g.account}</span>
+                <span className={styles.handle}>{primaryHandle(g)}</span>
                 <span className={styles.groupStats}>
-                  {g.members.length + 1} people · {g.projects.length} {g.projects.length === 1 ? "project" : "projects"}
+                  {g.members.length} {g.members.length === 1 ? "person" : "people"} · {g.posts.length} {g.posts.length === 1 ? "post" : "posts"}
                 </span>
               </span>
               <span className={styles.groupDots}>
@@ -772,55 +956,89 @@ function GroupPicker({
 
 interface DraftMember {
   key: string;
-  name: string;
-  role: string;
+  identifier: string;
+  role: Role;
   existing?: Member;
 }
 
-function draftsToMembers(drafts: DraftMember[]): Member[] {
+function draftsToMembers(drafts: DraftMember[], contacts: Member[]): Member[] {
   return drafts
-    .filter((d) => d.name.trim())
-    .map((d) =>
-      d.existing ? { ...d.existing, name: d.name.trim(), role: d.role.trim() || "Member" } : makeMember(d.name.trim(), d.role.trim() || "Member")
-    );
+    .filter((d) => isValidIdentifier(d.identifier))
+    .map((d) => {
+      if (d.existing) return { ...d.existing, role: d.role };
+      const known = findKnownContact(d.identifier, contacts);
+      if (known) return { ...known, role: d.role };
+      return makeMember(d.identifier, d.role);
+    });
 }
 
-function MemberEditor({ drafts, setDrafts }: { drafts: DraftMember[]; setDrafts: (fn: (d: DraftMember[]) => DraftMember[]) => void }) {
-  const addRow = () => setDrafts((d) => [...d, { key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, name: "", role: "" }]);
+function TeamEditor({
+  drafts,
+  setDrafts,
+  allGroups,
+}: {
+  drafts: DraftMember[];
+  setDrafts: (fn: (d: DraftMember[]) => DraftMember[]) => void;
+  allGroups: Group[];
+}) {
+  const addRow = () => setDrafts((d) => [...d, { key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, identifier: "", role: "member" }]);
   const removeRow = (key: string) => setDrafts((d) => d.filter((r) => r.key !== key));
   const updateRow = (key: string, patch: Partial<DraftMember>) => setDrafts((d) => d.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  const presentNames = new Set(drafts.map((d) => d.name.trim().toLowerCase()).filter(Boolean));
-  const suggestions = PEOPLE.filter((p) => !presentNames.has(p.name.toLowerCase()));
+
+  const contacts = allGroups.flatMap((g) => g.members);
+  const presentKeys = new Set(drafts.map((d) => d.identifier.trim().toLowerCase().replace(/^@/, "")).filter(Boolean));
+  const freq = new Map<string, { member: Member; count: number }>();
+  for (const m of contacts) {
+    const key = (m.email || m.username).toLowerCase().replace(/^@/, "");
+    if (!key || presentKeys.has(key)) continue;
+    const prev = freq.get(key);
+    if (prev) prev.count++;
+    else freq.set(key, { member: m, count: 1 });
+  }
+  const suggestions = [...freq.values()].sort((a, b) => b.count - a.count).slice(0, 6);
 
   return (
     <div className={styles.memberEditor}>
       {drafts.map((d) => (
         <div key={d.key} className={styles.memberRow}>
-          <input className={styles.input} placeholder="Name" value={d.name} onChange={(e) => updateRow(d.key, { name: e.target.value })} />
-          <input className={styles.input} list="postit-roles" placeholder="Role" value={d.role} onChange={(e) => updateRow(d.key, { role: e.target.value })} />
+          <input
+            className={styles.input}
+            placeholder="Email or @username"
+            value={d.identifier}
+            onChange={(e) => updateRow(d.key, { identifier: e.target.value, existing: undefined })}
+          />
+          <div className={styles.roleToggle}>
+            <button type="button" className={`${styles.roleBtn} ${d.role === "member" ? styles.roleBtnOn : ""}`} onClick={() => updateRow(d.key, { role: "member" })}>
+              Member
+            </button>
+            <button type="button" className={`${styles.roleBtn} ${d.role === "admin" ? styles.roleBtnOn : ""}`} onClick={() => updateRow(d.key, { role: "admin" })}>
+              Admin
+            </button>
+          </div>
           <button type="button" className={styles.iconClose} onClick={() => removeRow(d.key)} title="Remove">
             <Icon name="x" size={14} />
           </button>
         </div>
       ))}
-      <datalist id="postit-roles">
-        {ROLE_OPTIONS.map((r) => (
-          <option key={r} value={r} />
-        ))}
-      </datalist>
       <button type="button" className={styles.btnGhost} onClick={addRow}>
         <Icon name="plus" size={14} /> Add teammate
       </button>
       {suggestions.length > 0 && (
         <div className={styles.chipRow}>
-          {suggestions.map((p) => (
+          <span className={styles.chipLabel}>People you work with often</span>
+          {suggestions.map(({ member }) => (
             <button
               type="button"
-              key={p.id}
+              key={member.id}
               className={styles.chip}
-              onClick={() => setDrafts((d) => [...d, { key: `sugg-${p.id}-${Date.now()}`, name: p.name, role: p.role }])}
+              onClick={() =>
+                setDrafts((d) => [
+                  ...d,
+                  { key: `sugg-${member.id}-${Date.now()}`, identifier: member.email || member.username, role: "member", existing: member },
+                ])
+              }
             >
-              + {p.first} · {p.role}
+              + {member.name.split(/\s+/)[0]}
             </button>
           ))}
         </div>
@@ -829,33 +1047,90 @@ function MemberEditor({ drafts, setDrafts }: { drafts: DraftMember[]; setDrafts:
   );
 }
 
-function CreateGroupModal({ onCreate, onCancel }: { onCreate: (name: string, account: string, invitees: Member[]) => void; onCancel: () => void }) {
+function InstagramEditor({ handles, setHandles }: { handles: string[]; setHandles: (fn: (h: string[]) => string[]) => void }) {
+  const [input, setInput] = useState("");
+  const add = () => {
+    const h = normalizeHandle(input);
+    if (h && !handles.some((x) => x.toLowerCase() === h.toLowerCase())) setHandles((hs) => [...hs, h]);
+    setInput("");
+  };
+  return (
+    <div className={styles.igEditor}>
+      <div className={styles.igRow}>
+        <input
+          className={styles.input}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="@youraccount"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button type="button" className={styles.btnGhost2} onClick={add} disabled={!input.trim()}>
+          <Icon name="plus" size={14} /> Add
+        </button>
+      </div>
+      {handles.length > 0 && (
+        <div className={styles.chipRow}>
+          {handles.map((h) => (
+            <span key={h} className={`${styles.chip} ${styles.igChip}`}>
+              <Icon name="instagram" size={12} /> {h}
+              <button type="button" onClick={() => setHandles((hs) => hs.filter((x) => x !== h))} title="Remove">
+                <Icon name="x" size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CreateGroupModal({
+  allGroups,
+  onCreate,
+  onCancel,
+}: {
+  allGroups: Group[];
+  onCreate: (name: string, invitees: Member[], instagramAccounts: InstagramAccount[]) => void;
+  onCancel: () => void;
+}) {
   const [name, setName] = useState("");
-  const [account, setAccount] = useState("");
   const [drafts, setDrafts] = useState<DraftMember[]>([]);
+  const [igHandles, setIgHandles] = useState<string[]>([]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onCreate(name.trim(), account, draftsToMembers(drafts));
+    const contacts = allGroups.flatMap((g) => g.members);
+    onCreate(
+      name.trim(),
+      draftsToMembers(drafts, contacts),
+      igHandles.map((h) => ({ id: `${slugify(h)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`, handle: h }))
+    );
   };
 
   return (
     <div className={styles.overlay} onClick={onCancel}>
       <form className={`${styles.modal} ${styles.modalWide}`} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h2>Create a group</h2>
-        <p className={styles.sub}>Each group has its own account and its own projects.</p>
+        <p className={styles.sub}>Each group has its own team and posts to its own Instagram accounts.</p>
         <div className={styles.field}>
           <label htmlFor="gname">Group name</label>
           <input id="gname" className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Outdoors" autoFocus />
         </div>
         <div className={styles.field}>
-          <label htmlFor="gaccount">Account it posts to</label>
-          <input id="gaccount" className={styles.input} value={account} onChange={(e) => setAccount(e.target.value)} placeholder="@acmeoutdoors" />
+          <label>Invite teammates (optional)</label>
+          <p className={styles.fieldNote}>Admins have final say on posting. Team members can request a post for an admin to approve.</p>
+          <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} />
         </div>
         <div className={styles.field}>
-          <label>Invite teammates (optional)</label>
-          <MemberEditor drafts={drafts} setDrafts={setDrafts} />
+          <label>Link Instagram accounts</label>
+          <p className={styles.fieldNote}>Optional for now — you&rsquo;ll need at least one linked account before this group can post.</p>
+          <InstagramEditor handles={igHandles} setHandles={setIgHandles} />
         </div>
         <div className={styles.modalActions}>
           <button type="button" className={styles.btnGhost} onClick={onCancel}>
@@ -870,12 +1145,25 @@ function CreateGroupModal({ onCreate, onCancel }: { onCreate: (name: string, acc
   );
 }
 
-function InviteModal({ group, onSave, onCancel }: { group: Group; onSave: (members: Member[]) => void; onCancel: () => void }) {
-  const [drafts, setDrafts] = useState<DraftMember[]>(() => group.members.map((m) => ({ key: m.id, name: m.name, role: m.role, existing: m })));
+function InviteModal({
+  group,
+  allGroups,
+  onSave,
+  onCancel,
+}: {
+  group: Group;
+  allGroups: Group[];
+  onSave: (members: Member[]) => void;
+  onCancel: () => void;
+}) {
+  const [drafts, setDrafts] = useState<DraftMember[]>(() =>
+    group.members.map((m) => ({ key: m.id, identifier: m.email || m.username, role: m.role, existing: m }))
+  );
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    onSave(draftsToMembers(drafts));
+    const contacts = allGroups.flatMap((g) => g.members);
+    onSave(draftsToMembers(drafts, contacts));
   };
 
   return (
@@ -883,9 +1171,9 @@ function InviteModal({ group, onSave, onCancel }: { group: Group; onSave: (membe
       <form className={`${styles.modal} ${styles.modalWide}`} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h2>Team &amp; roles</h2>
         <p className={styles.sub}>
-          Who&rsquo;s in <b>{group.name}</b>, and what they do.
+          Who&rsquo;s in <b>{group.name}</b>. Admins can post; team members can request a post.
         </p>
-        <MemberEditor drafts={drafts} setDrafts={setDrafts} />
+        <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} />
         <div className={styles.modalActions}>
           <button type="button" className={styles.btnGhost} onClick={onCancel}>
             Cancel
@@ -899,7 +1187,44 @@ function InviteModal({ group, onSave, onCancel }: { group: Group; onSave: (membe
   );
 }
 
-function CreateProjectModal({ onCreate, onCancel }: { onCreate: (name: string, when: string) => void; onCancel: () => void }) {
+function InstagramModal({
+  group,
+  onSave,
+  onCancel,
+}: {
+  group: Group;
+  onSave: (accounts: InstagramAccount[]) => void;
+  onCancel: () => void;
+}) {
+  const [handles, setHandles] = useState<string[]>(group.instagramAccounts.map((a) => a.handle));
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    onSave(handles.map((h) => ({ id: `${slugify(h)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`, handle: h })));
+  };
+
+  return (
+    <div className={styles.overlay} onClick={onCancel}>
+      <form className={styles.modal} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h2>Instagram accounts</h2>
+        <p className={styles.sub}>
+          Accounts <b>{group.name}</b> can post to. You need at least one linked account to mark a post as posted.
+        </p>
+        <InstagramEditor handles={handles} setHandles={setHandles} />
+        <div className={styles.modalActions}>
+          <button type="button" className={styles.btnGhost} onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className={styles.btnPrimary}>
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CreatePostModal({ onCreate, onCancel }: { onCreate: (name: string, when: string) => void; onCancel: () => void }) {
   const [name, setName] = useState("");
   const [when, setWhen] = useState("");
 
@@ -912,10 +1237,10 @@ function CreateProjectModal({ onCreate, onCancel }: { onCreate: (name: string, w
   return (
     <div className={styles.overlay} onClick={onCancel}>
       <form className={styles.modal} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h2>Create a project</h2>
-        <p className={styles.sub}>A project holds the photos, drafts and votes for one shoot.</p>
+        <h2>Create a post</h2>
+        <p className={styles.sub}>A post holds the photos, drafts and votes for one shoot.</p>
         <div className={styles.field}>
-          <label htmlFor="pname">Project name</label>
+          <label htmlFor="pname">Post name</label>
           <input id="pname" className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Spring Lookbook" autoFocus />
         </div>
         <div className={styles.field}>
@@ -927,7 +1252,7 @@ function CreateProjectModal({ onCreate, onCancel }: { onCreate: (name: string, w
             Cancel
           </button>
           <button type="submit" className={styles.btnPrimary} disabled={!name.trim()}>
-            Create project
+            Create post
           </button>
         </div>
       </form>
@@ -939,55 +1264,64 @@ function AppShell({
   user,
   group,
   screen,
-  activeProjectId,
+  activePostId,
   menuOpen,
+  liveCursors,
+  onToggleLiveCursors,
   onToggleMenu,
   onSwitchGroup,
   onSignOut,
-  onDm,
   onInvite,
-  onRail,
-  onOpenProjects,
+  onOpenInstagram,
+  onOpenPosts,
   onOpenPosted,
-  onOpenChat,
   onOpenActivity,
-  onOpenProject,
-  onNewProject,
-  onAddPhotos,
-  onUpdatePost,
+  onOpenMedia,
+  onOpenPost,
+  onNewPost,
+  onAddMedia,
+  onCreateFolder,
+  onDeleteFolder,
+  onMoveToFolder,
+  onUpdateDraft,
   onSetPosted,
   onRequestPost,
-  onDropPhotoOnProject,
+  onDropPhotoOnPost,
   onSendChat,
 }: {
   user: CurrentUser;
   group: Group;
   screen: Screen;
-  activeProjectId: string | null;
+  activePostId: string | null;
   menuOpen: boolean;
+  liveCursors: boolean;
+  onToggleLiveCursors: () => void;
   onToggleMenu: () => void;
   onSwitchGroup: () => void;
   onSignOut: () => void;
-  onDm: (p: Member) => void;
   onInvite: () => void;
-  onRail: (label: string) => void;
-  onOpenProjects: () => void;
+  onOpenInstagram: () => void;
+  onOpenPosts: () => void;
   onOpenPosted: () => void;
-  onOpenChat: () => void;
   onOpenActivity: () => void;
-  onOpenProject: (id: string) => void;
-  onNewProject: () => void;
-  onAddPhotos: (projectId: string, files: FileList) => void;
-  onUpdatePost: (projectId: string, fn: (post: Post) => Post) => void;
-  onSetPosted: (projectId: string, posted: boolean) => void;
-  onRequestPost: (projectId: string, projectName: string) => void;
-  onDropPhotoOnProject: (projectId: string, photoId: string) => void;
+  onOpenMedia: () => void;
+  onOpenPost: (id: string) => void;
+  onNewPost: () => void;
+  onAddMedia: (files: FileList, folderId?: string | null) => void;
+  onCreateFolder: (name: string) => void;
+  onDeleteFolder: (folderId: string) => void;
+  onMoveToFolder: (photoId: string, folderId: string | null) => void;
+  onUpdateDraft: (postId: string, fn: (draft: Draft) => Draft) => void;
+  onSetPosted: (postId: string, posted: boolean) => void;
+  onRequestPost: (postId: string, postName: string) => void;
+  onDropPhotoOnPost: (postId: string, photoId: string) => void;
   onSendChat: (text: string) => void;
 }) {
-  const [mediaOpen, setMediaOpen] = useState(false);
   const members = group.members;
   const first = user.name.trim().split(/\s+/)[0] || user.name;
-  const activeProject = group.projects.find((p) => p.id === activeProjectId) ?? null;
+  const activePost = group.posts.find((p) => p.id === activePostId) ?? null;
+  const isAdmin = group.members.find((m) => (m.email && m.email === user.email) || (m.username && m.username === user.username))?.role === "admin";
+  const canPost = group.instagramAccounts.length > 0;
 
   return (
     <div className={styles.shell}>
@@ -999,17 +1333,11 @@ function AppShell({
           <button className={styles.crumbBtn} onClick={onSwitchGroup} title="Switch group">
             {group.name}
           </button>
-          {screen === "projects" && <span className={styles.handleMono}>{group.account}</span>}
+          {screen === "posts" && <span className={styles.handleMono}>{primaryHandle(group)}</span>}
           {screen === "posted" && (
             <>
               <span className={styles.crumbSep}>›</span>
               <span className={styles.crumbCurrent}>Posted</span>
-            </>
-          )}
-          {screen === "chat" && (
-            <>
-              <span className={styles.crumbSep}>›</span>
-              <span className={styles.crumbCurrent}>Chat</span>
             </>
           )}
           {screen === "activity" && (
@@ -1018,23 +1346,29 @@ function AppShell({
               <span className={styles.crumbCurrent}>Activity</span>
             </>
           )}
-          {screen === "project" && activeProject && (
+          {screen === "media" && (
             <>
               <span className={styles.crumbSep}>›</span>
-              <button className={styles.crumbBtn} onClick={onOpenProjects}>
-                Projects
+              <span className={styles.crumbCurrent}>Media</span>
+            </>
+          )}
+          {screen === "post" && activePost && (
+            <>
+              <span className={styles.crumbSep}>›</span>
+              <button className={styles.crumbBtn} onClick={onOpenPosts}>
+                Posts
               </button>
               <span className={styles.crumbSep}>›</span>
-              <span className={styles.crumbCurrent}>{activeProject.name}</span>
+              <span className={styles.crumbCurrent}>{activePost.name}</span>
             </>
           )}
         </nav>
         <div className={styles.grow} />
         <div className={styles.presence}>
           {members.map((p) => (
-            <button key={p.id} className={styles.presenceBtn} title={`${p.name} · ${p.role}`} onClick={() => onDm(p)}>
+            <span key={p.id} className={styles.presenceBtn} title={`${p.name} · ${p.role === "admin" ? "Admin" : "Team member"}`}>
               <Avatar name={p.name} color={p.color} fg={p.fg} />
-            </button>
+            </span>
           ))}
           <button className={styles.presenceAdd} title="Invite teammates" onClick={onInvite}>
             <Icon name="plus" size={13} />
@@ -1062,11 +1396,11 @@ function AppShell({
 
       <div className={styles.body}>
         <nav className={styles.irail} aria-label="Workspace">
-          <button className={`${styles.ib} ${screen === "projects" || screen === "project" ? styles.ibOn : ""}`} title="Projects" onClick={onOpenProjects}>
+          <button className={`${styles.ib} ${screen === "posts" || screen === "post" ? styles.ibOn : ""}`} title="Posts" onClick={onOpenPosts}>
             <Icon name="folder" size={20} />
-            Projects
+            Posts
           </button>
-          <button className={`${styles.ib} ${mediaOpen ? styles.ibOn : ""}`} title="Media" onClick={() => setMediaOpen((v) => !v)}>
+          <button className={`${styles.ib} ${screen === "media" ? styles.ibOn : ""}`} title="Media" onClick={onOpenMedia}>
             <Icon name="image" size={20} />
             Media
           </button>
@@ -1074,66 +1408,78 @@ function AppShell({
             <Icon name="check" size={20} />
             Posted
           </button>
-          <button className={`${styles.ib} ${screen === "chat" ? styles.ibOn : ""}`} title="Chat" onClick={onOpenChat}>
-            <Icon name="chat" size={20} />
-            Chat
-          </button>
           <button className={`${styles.ib} ${screen === "activity" ? styles.ibOn : ""}`} title="Activity" onClick={onOpenActivity}>
             <Icon name="clock" size={20} />
             Activity
           </button>
           <span className={styles.ibSpacer} />
-          <button className={styles.ib} title="Settings" onClick={() => onRail("Settings")}>
-            <Icon name="sliders" size={20} />
-            Settings
+          <button className={styles.ib} title="Instagram accounts" onClick={onOpenInstagram}>
+            <Icon name="instagram" size={20} />
+            Instagram
           </button>
         </nav>
 
         <main className={styles.main}>
-          {screen === "projects" && (
-            <ProjectsGrid
-              group={group}
-              members={members}
-              view="active"
-              onOpenProject={onOpenProject}
-              onNewProject={onNewProject}
-              onDropPhoto={onDropPhotoOnProject}
-            />
+          {screen === "posts" && (
+            <PostsGrid group={group} members={members} view="active" onOpenPost={onOpenPost} onNewPost={onNewPost} onDropPhoto={onDropPhotoOnPost} />
           )}
           {screen === "posted" && (
-            <ProjectsGrid group={group} members={members} view="posted" onOpenProject={onOpenProject} onNewProject={onNewProject} onDropPhoto={onDropPhotoOnProject} />
+            <PostsGrid group={group} members={members} view="posted" onOpenPost={onOpenPost} onNewPost={onNewPost} onDropPhoto={onDropPhotoOnPost} />
           )}
-          {screen === "chat" && <ChatPanel group={group} onSend={onSendChat} />}
           {screen === "activity" && <ActivityPanel group={group} />}
-          {screen === "project" && activeProject && (
-            <ProjectDetail
+          {screen === "media" && (
+            <MediaPage
               group={group}
-              project={activeProject}
+              onAddMedia={onAddMedia}
+              onCreateFolder={onCreateFolder}
+              onDeleteFolder={onDeleteFolder}
+              onMoveToFolder={onMoveToFolder}
+              onAddToPost={onDropPhotoOnPost}
+            />
+          )}
+          {screen === "post" && activePost && (
+            <PostDetail
+              group={group}
+              post={activePost}
               me={user}
-              onAddPhotos={(files) => onAddPhotos(activeProject.id, files)}
-              onUpdatePost={(fn) => onUpdatePost(activeProject.id, fn)}
-              onSetPosted={(posted) => onSetPosted(activeProject.id, posted)}
-              onRequestPost={() => onRequestPost(activeProject.id, activeProject.name)}
-              onDropPhoto={(photoId) => onDropPhotoOnProject(activeProject.id, photoId)}
+              isAdmin={isAdmin}
+              canPost={canPost}
+              liveCursors={liveCursors}
+              onToggleLiveCursors={onToggleLiveCursors}
+              onAddMedia={onAddMedia}
+              onUpdateDraft={(fn) => onUpdateDraft(activePost.id, fn)}
+              onSetPosted={(posted) => onSetPosted(activePost.id, posted)}
+              onRequestPost={() => onRequestPost(activePost.id, activePost.name)}
+              onDropPhoto={(photoId) => onDropPhotoOnPost(activePost.id, photoId)}
+              onOpenInstagram={onOpenInstagram}
             />
           )}
         </main>
-
-        {mediaOpen && (
-          <MediaDrawer
-            group={group}
-            activeProjectId={screen === "project" ? activeProjectId : null}
-            onAddToActive={activeProjectId ? (photoId) => onDropPhotoOnProject(activeProjectId, photoId) : null}
-            onClose={() => setMediaOpen(false)}
-          />
-        )}
       </div>
+
+      <ChatBubble key={group.id} group={group} onSend={onSendChat} />
     </div>
   );
 }
 
-function ChatPanel({ group, onSend }: { group: Group; onSend: (text: string) => void }) {
+function ChatBubble({ group, onSend }: { group: Group; onSend: (text: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [seenCount, setSeenCount] = useState(group.chat.length);
   const [text, setText] = useState("");
+
+  if (open && seenCount !== group.chat.length) {
+    setSeenCount(group.chat.length);
+  }
+
+  const unread = open ? 0 : Math.max(0, group.chat.length - seenCount);
+
+  const toggle = () => {
+    setOpen((v) => {
+      const next = !v;
+      if (next) setSeenCount(group.chat.length);
+      return next;
+    });
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -1143,35 +1489,45 @@ function ChatPanel({ group, onSend }: { group: Group; onSend: (text: string) => 
   };
 
   return (
-    <div className={styles.chatWrap}>
-      <div className={styles.chatHead}>
-        <h1>{group.name} · Chat</h1>
-        <p>Everyone in {group.name} sees this thread.</p>
-      </div>
-      <div className={styles.chatList}>
-        {group.chat.length === 0 ? (
-          <p className={styles.hint}>No messages yet. Say hello.</p>
-        ) : (
-          group.chat.map((m) => (
-            <div key={m.id} className={styles.chatMsg}>
-              <Avatar name={m.authorName} color={m.color} fg={m.fg} />
-              <div className={styles.chatBody}>
-                <div className={styles.chatMeta}>
-                  <b>{m.authorId === "me" ? "You" : m.authorName}</b>
-                  <span className={styles.hint}>{timeAgo(m.at)}</span>
+    <div className={styles.chatWidget}>
+      {open && (
+        <div className={styles.chatPopup}>
+          <div className={styles.chatPopupHead}>
+            <b>{group.name} chat</b>
+            <button className={styles.iconClose} onClick={() => setOpen(false)} title="Close">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+          <div className={styles.chatPopupList}>
+            {group.chat.length === 0 ? (
+              <p className={styles.hint}>No messages yet. Say hello.</p>
+            ) : (
+              group.chat.map((m) => (
+                <div key={m.id} className={styles.chatPopupMsg}>
+                  <Avatar name={m.authorName} color={m.color} fg={m.fg} size="sm" />
+                  <div className={styles.chatPopupBody}>
+                    <div className={styles.chatPopupMeta}>
+                      <b>{m.authorId === "me" ? "You" : m.authorName}</b>
+                      <span className={styles.hint}>{timeAgo(m.at)}</span>
+                    </div>
+                    <p>{m.text}</p>
+                  </div>
                 </div>
-                <p>{m.text}</p>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-      <form className={styles.chatInputRow} onSubmit={submit}>
-        <input className={styles.input} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message ${group.name}…`} />
-        <button type="submit" className={styles.btnSm} disabled={!text.trim()}>
-          <Icon name="send" size={14} /> Send
-        </button>
-      </form>
+              ))
+            )}
+          </div>
+          <form className={styles.chatPopupInputRow} onSubmit={submit}>
+            <input className={styles.input} value={text} onChange={(e) => setText(e.target.value)} placeholder="Message the group…" />
+            <button type="submit" className={styles.btnSm} disabled={!text.trim()}>
+              <Icon name="send" size={14} />
+            </button>
+          </form>
+        </div>
+      )}
+      <button className={styles.chatFab} onClick={toggle} title="Chat">
+        <Icon name={open ? "x" : "chat"} size={22} />
+        {unread > 0 && <span className={styles.chatBadge}>{unread}</span>}
+      </button>
     </div>
   );
 }
@@ -1211,72 +1567,60 @@ function ActivityPanel({ group }: { group: Group }) {
   );
 }
 
-type PhotoStatus = "approved" | "needs" | "declined";
-
-function photoStatus(ups: number, downs: number): PhotoStatus {
-  if (ups > downs && ups > 0) return "approved";
-  if (downs > ups && downs > 0) return "declined";
-  return "needs";
-}
-
-const STATUS_META: Record<PhotoStatus, { label: string; icon: keyof typeof ICON_PATHS; pill: string }> = {
-  approved: { label: "Approved", icon: "check", pill: styles.pillOk },
-  declined: { label: "Declined", icon: "x", pill: styles.pillBad },
-  needs: { label: "Needs vote", icon: "clock", pill: styles.pillWarn },
-};
-
 function postedLabel(postedAt: number | null): string {
   if (!postedAt) return "Posted";
   return `Posted ${new Date(postedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
-function ProjectsGrid({
+function PostsGrid({
   group,
   members,
   view,
-  onOpenProject,
-  onNewProject,
+  onOpenPost,
+  onNewPost,
   onDropPhoto,
 }: {
   group: Group;
   members: Member[];
   view: "active" | "posted";
-  onOpenProject: (id: string) => void;
-  onNewProject: () => void;
-  onDropPhoto: (projectId: string, photoId: string) => void;
+  onOpenPost: (id: string) => void;
+  onNewPost: () => void;
+  onDropPhoto: (postId: string, photoId: string) => void;
 }) {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const projects = group.projects.filter((p) => (view === "posted" ? p.posted : !p.posted));
+  const posts = group.posts.filter((p) => (view === "posted" ? p.posted : !p.posted));
+  const mediaById = new Map(group.media.map((m) => [m.id, m]));
 
   return (
     <div className={styles.home}>
       <h1>{view === "posted" ? `${group.name} · Posted` : group.name}</h1>
       <p>
-        {group.account} · {projects.length} {projects.length === 1 ? "project" : "projects"}
+        {primaryHandle(group)} · {posts.length} {posts.length === 1 ? "post" : "posts"}
       </p>
-      {projects.length === 0 && view === "posted" ? (
+      {posts.length === 0 && view === "posted" ? (
         <div className={styles.emptyBlock}>
-          <p>Nothing posted yet. Mark a project as posted once it&rsquo;s live.</p>
+          <p>Nothing posted yet. Mark a post as posted once it&rsquo;s live.</p>
         </div>
       ) : (
         <div className={styles.pgrid}>
-          {projects.map((proj) => {
-            const cover: (Photo | null)[] = [0, 1, 2].map((i) => proj.photos[i] ?? null);
+          {posts.map((post) => {
+            const slidePhotos = post.draft.slideIds.map((id) => mediaById.get(id)).filter((p): p is Photo => !!p);
+            const cover: (Photo | null)[] = [0, 1, 2].map((i) => slidePhotos[i] ?? null);
             return (
               <button
-                key={proj.id}
-                className={`${styles.pc} ${dragOverId === proj.id ? styles.pcDrop : ""}`}
-                onClick={() => onOpenProject(proj.id)}
+                key={post.id}
+                className={`${styles.pc} ${dragOverId === post.id ? styles.pcDrop : ""}`}
+                onClick={() => onOpenPost(post.id)}
                 onDragOver={(e) => {
                   e.preventDefault();
-                  setDragOverId(proj.id);
+                  setDragOverId(post.id);
                 }}
-                onDragLeave={() => setDragOverId((id) => (id === proj.id ? null : id))}
+                onDragLeave={() => setDragOverId((id) => (id === post.id ? null : id))}
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragOverId(null);
                   const id = e.dataTransfer.getData("text/plain");
-                  if (id) onDropPhoto(proj.id, id);
+                  if (id) onDropPhoto(post.id, id);
                 }}
               >
                 <span className={styles.col}>
@@ -1285,20 +1629,20 @@ function ProjectsGrid({
                   ))}
                 </span>
                 <span className={styles.pcB}>
-                  <b>{proj.name}</b>
+                  <b>{post.name}</b>
                   <small>
-                    {proj.date} · {proj.photos.length} photos
+                    {post.date} · {slidePhotos.length} {slidePhotos.length === 1 ? "photo" : "photos"}
                   </small>
                   <span className={styles.pcF}>
-                    {proj.posted ? (
+                    {post.posted ? (
                       <span className={`${styles.pill} ${styles.pillOk}`}>
-                        <Icon name="check" size={11} /> {postedLabel(proj.postedAt)}
+                        <Icon name="check" size={11} /> {postedLabel(post.postedAt)}
                       </span>
                     ) : (
                       <>
-                        {proj.requested && <span className={`${styles.pill} ${styles.pillWarn}`}>Requested</span>}
-                        {proj.ready > 0 && <span className={`${styles.pill} ${styles.pillOk}`}>{proj.ready} ready to post</span>}
-                        {proj.pending > 0 && <span className={`${styles.pill} ${styles.pillWarn}`}>{proj.pending} in progress</span>}
+                        {post.requested && <span className={`${styles.pill} ${styles.pillWarn}`}>Requested</span>}
+                        {post.ready > 0 && <span className={`${styles.pill} ${styles.pillOk}`}>{post.ready} ready to post</span>}
+                        {post.pending > 0 && <span className={`${styles.pill} ${styles.pillWarn}`}>{post.pending} in progress</span>}
                       </>
                     )}
                     <span className={styles.dots}>
@@ -1312,8 +1656,8 @@ function ProjectsGrid({
             );
           })}
           {view === "active" && (
-            <button className={`${styles.pc} ${styles.pcNew}`} onClick={onNewProject}>
-              <Icon name="plus" size={22} /> New project
+            <button className={`${styles.pc} ${styles.pcNew}`} onClick={onNewPost}>
+              <Icon name="plus" size={22} /> New post
             </button>
           )}
         </div>
@@ -1322,119 +1666,210 @@ function ProjectsGrid({
   );
 }
 
-function ProjectDetail({
+function PostDetail({
   group,
-  project,
+  post,
   me,
-  onAddPhotos,
-  onUpdatePost,
+  isAdmin,
+  canPost,
+  liveCursors,
+  onToggleLiveCursors,
+  onAddMedia,
+  onUpdateDraft,
   onSetPosted,
   onRequestPost,
   onDropPhoto,
+  onOpenInstagram,
 }: {
   group: Group;
-  project: ProjectCard;
+  post: PostCard;
   me: CurrentUser;
-  onAddPhotos: (files: FileList) => void;
-  onUpdatePost: (fn: (post: Post) => Post) => void;
+  isAdmin: boolean;
+  canPost: boolean;
+  liveCursors: boolean;
+  onToggleLiveCursors: () => void;
+  onAddMedia: (files: FileList) => void;
+  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
   onSetPosted: (posted: boolean) => void;
   onRequestPost: () => void;
   onDropPhoto: (photoId: string) => void;
+  onOpenInstagram: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [slidesDragOver, setSlidesDragOver] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(true);
   const voterKey = me.email;
   const members = group.members;
+  const threshold = Math.max(1, Math.ceil(members.length / 2));
 
-  const fullPool = groupPhotoPool(group);
-  const poolById = new Map(fullPool.map((gp) => [gp.photo.id, gp]));
+  const [cursors, setCursors] = useState<Record<string, { x: number; y: number; color: string; name: string }>>({});
+  const lastCursorSent = useRef(0);
+  const roomId = `${group.id}:${post.id}`;
 
-  const slideIds = project.post.slideIds;
-  const slides = slideIds.map((id) => poolById.get(id)).filter((gp): gp is GroupPhoto => !!gp);
+  const socket = usePartySocket({
+    host: process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:8788",
+    party: "postit",
+    room: roomId,
+    enabled: liveCursors,
+    onOpen() {
+      socket.send(JSON.stringify({ type: "join", name: me.name, color: me.color }));
+    },
+    onMessage(event) {
+      const msg: PostitServerMessage = JSON.parse(event.data);
+      if (msg.type === "presence") {
+        const ids = new Set(msg.players.map((p) => p.id));
+        setCursors((prev) => {
+          const next: typeof prev = {};
+          for (const [id, c] of Object.entries(prev)) if (ids.has(id)) next[id] = c;
+          return next;
+        });
+      } else if (msg.type === "cursor") {
+        setCursors((prev) => ({ ...prev, [msg.playerId]: { x: msg.x, y: msg.y, color: msg.color, name: msg.name } }));
+      }
+    },
+  });
 
-  const removeSlide = (id: string) => onUpdatePost((post) => ({ ...post, slideIds: post.slideIds.filter((x) => x !== id) }));
-  const moveSlide = (index: number, dir: -1 | 1) => {
-    const target = index + dir;
-    if (target < 0 || target >= slideIds.length) return;
-    onUpdatePost((post) => {
-      const next = post.slideIds.slice();
-      [next[index], next[target]] = [next[target], next[index]];
-      return { ...post, slideIds: next };
-    });
+  useEffect(() => {
+    if (!liveCursors) return;
+    const handleMove = (e: MouseEvent) => {
+      const now = Date.now();
+      if (now - lastCursorSent.current < 40) return;
+      lastCursorSent.current = now;
+      socket.send(JSON.stringify({ type: "cursor", x: e.clientX, y: e.clientY }));
+    };
+    window.addEventListener("mousemove", handleMove);
+    return () => window.removeEventListener("mousemove", handleMove);
+  }, [liveCursors, socket]);
+
+  const handleToggleLiveCursors = () => {
+    if (liveCursors) setCursors({});
+    onToggleLiveCursors();
   };
+
+  const pool = groupMediaPool(group);
+  const mediaById = new Map(pool.map((p) => [p.id, p]));
+
+  const slideIds = post.draft.slideIds;
+  const slides = slideIds.map((id) => mediaById.get(id)).filter((p): p is Photo => !!p);
+
+  const removeSlide = (id: string) => onUpdateDraft((draft) => ({ ...draft, slideIds: draft.slideIds.filter((x) => x !== id) }));
 
   const setVote = (photoId: string, voter: string, vote: Vote) => {
-    onUpdatePost((post) => {
-      const current = post.votes[photoId]?.[voter];
-      const forPhoto = { ...(post.votes[photoId] ?? {}) };
+    onUpdateDraft((draft) => {
+      const current = draft.votes[photoId]?.[voter];
+      const forPhoto = { ...(draft.votes[photoId] ?? {}) };
       if (current === vote) delete forPhoto[voter];
       else forPhoto[voter] = vote;
-      return { ...post, votes: { ...post.votes, [photoId]: forPhoto } };
-    });
-  };
-  const cycleMemberVote = (photoId: string, voter: string) => {
-    onUpdatePost((post) => {
-      const current = post.votes[photoId]?.[voter];
-      const next: Vote | undefined = current === undefined ? "up" : current === "up" ? "down" : undefined;
-      const forPhoto = { ...(post.votes[photoId] ?? {}) };
-      if (next === undefined) delete forPhoto[voter];
-      else forPhoto[voter] = next;
-      return { ...post, votes: { ...post.votes, [photoId]: forPhoto } };
+      return { ...draft, votes: { ...draft.votes, [photoId]: forPhoto } };
     });
   };
 
   const credits: string[] = [];
-  for (const gp of slides) if (!credits.includes(gp.photo.uploadedBy)) credits.push(gp.photo.uploadedBy);
+  for (const photo of slides) if (!credits.includes(photo.uploadedBy)) credits.push(photo.uploadedBy);
+  const inCount = slides.filter((photo) => {
+    const voteMap = post.draft.votes[photo.id] ?? {};
+    const ups = Object.values(voteMap).filter((v) => v === "up").length;
+    return ups >= threshold;
+  }).length;
+
+  const postDisabled = !isAdmin || (!post.posted && (slides.length === 0 || !canPost));
+  const postTitle = !isAdmin ? "Only admins can mark a post as posted" : !canPost && !post.posted ? "Link an Instagram account first" : undefined;
 
   return (
     <>
       <div className={`${styles.home} ${previewOpen ? styles.previewGutter : ""}`}>
         <div className={styles.projHead}>
           <div>
-            <h1>{project.name}</h1>
-            <p>
-              {project.date} · {project.photos.length} {project.photos.length === 1 ? "photo" : "photos"}
-            </p>
+            <h1>{post.name}</h1>
+            <p>{post.date}</p>
           </div>
-          {project.posted ? (
+          {post.posted ? (
             <span className={`${styles.pill} ${styles.pillOk}`}>
-              <Icon name="check" size={11} /> {postedLabel(project.postedAt)}
+              <Icon name="check" size={11} /> {postedLabel(post.postedAt)}
             </span>
-          ) : project.requested ? (
+          ) : post.requested ? (
             <span className={`${styles.pill} ${styles.pillWarn}`}>Requested</span>
           ) : null}
-          {!project.posted && (
-            <button className={styles.btnGhost2} disabled={project.requested || slides.length === 0} onClick={onRequestPost}>
-              {project.requested ? "Requested" : "Request to post"}
+          {!post.posted && (
+            <button className={styles.btnGhost2} disabled={post.requested || slides.length === 0} onClick={onRequestPost}>
+              {post.requested ? "Requested" : "Request to post"}
             </button>
           )}
-          <button className={styles.btnGhost2} disabled={!project.posted && slides.length === 0} onClick={() => onSetPosted(!project.posted)}>
-            {project.posted ? "Move back to drafts" : "Mark as posted"}
+          <button className={styles.btnGhost2} disabled={postDisabled} title={postTitle} onClick={() => onSetPosted(!post.posted)}>
+            {post.posted ? "Move back to drafts" : "Mark as posted"}
           </button>
-          <button className={styles.btnSm} onClick={() => fileRef.current?.click()}>
-            <Icon name="plus" size={16} /> Add photos
+          <button
+            className={`${styles.btnGhost2} ${liveCursors ? styles.liveCursorsOn : ""}`}
+            onClick={handleToggleLiveCursors}
+            title={liveCursors ? "Hide teammates' live cursors" : "Show teammates' live cursors"}
+          >
+            <Icon name="cursor" size={13} /> Live cursors {liveCursors ? "on" : "off"}
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            onChange={(e) => {
-              if (e.target.files) onAddPhotos(e.target.files);
-              e.target.value = "";
-            }}
-          />
         </div>
+        {!canPost && !post.posted && (
+          <button type="button" className={styles.linkIgHint} onClick={onOpenInstagram}>
+            <Icon name="instagram" size={12} /> Link an Instagram account to post
+          </button>
+        )}
 
-        <section className={styles.work}>
-          <div className={styles.sectHead}>
-            <h3>Photos in this post</h3>
-            <span className={styles.hint}>{slides.length} added</span>
-          </div>
-          <div
-            className={`${styles.slideDrop} ${slidesDragOver ? styles.slideDropOver : ""}`}
+        <div className={styles.postLayout}>
+          <aside className={styles.photosPanel}>
+            <div className={styles.panelHead}>
+              <div>
+                <h3>Photos</h3>
+                <span className={styles.hint}>Drag into the carousel</span>
+              </div>
+              <button className={styles.btnGhost2} onClick={() => fileRef.current?.click()}>
+                <Icon name="plus" size={14} /> Add
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  if (e.target.files) onAddMedia(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {pool.length === 0 ? (
+              <p className={styles.emptyTray}>No photos yet. Add some to get started.</p>
+            ) : (
+              <div className={styles.drawerGrid}>
+                {pool.map((photo) => {
+                  const included = slideIds.includes(photo.id);
+                  return (
+                    <button
+                      key={photo.id}
+                      className={`${styles.trayThumb} ${included ? styles.trayThumbOn : ""}`}
+                      draggable
+                      onDragStart={(e) => e.dataTransfer.setData("text/plain", photo.id)}
+                      onClick={() => {
+                        if (!included) onDropPhoto(photo.id);
+                      }}
+                      title={photo.name}
+                    >
+                      <PhotoThumb photo={photo} />
+                      {included && (
+                        <span className={styles.trayCheck}>
+                          <Icon name="check" size={12} />
+                        </span>
+                      )}
+                      <span className={styles.trayTag}>
+                        {photo.uploadedBy}
+                        {included ? " · added" : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </aside>
+
+          <section
+            className={styles.carouselPanel}
             onDragOver={(e) => {
               e.preventDefault();
               setSlidesDragOver(true);
@@ -1447,109 +1882,98 @@ function ProjectDetail({
               if (id) onDropPhoto(id);
             }}
           >
-            {slides.length === 0 ? (
-              <div className={styles.slidePlaceholder}>Open Media in the side rail and drag or click photos in here.</div>
-            ) : (
-              <div className={styles.slideRow}>
-                {slides.map((gp, i) => {
-                  const voteMap = project.post.votes[gp.photo.id] ?? {};
-                  const ups = Object.values(voteMap).filter((v) => v === "up").length;
-                  const downs = Object.values(voteMap).filter((v) => v === "down").length;
-                  const myVote = voteMap[voterKey];
-                  const status = photoStatus(ups, downs);
-                  const statusMeta = STATUS_META[status];
-                  return (
-                    <div key={gp.photo.id} className={styles.slideCard}>
-                      <div className={styles.slideThumb}>
-                        <PhotoThumb photo={gp.photo} />
-                        <button className={styles.slideRemove} onClick={() => removeSlide(gp.photo.id)} title="Remove">
-                          <Icon name="x" size={12} />
-                        </button>
-                        <div className={styles.slideNav}>
-                          <button disabled={i === 0} onClick={() => moveSlide(i, -1)} title="Move left">
-                            <Icon name="l" size={12} />
-                          </button>
-                          <button disabled={i === slides.length - 1} onClick={() => moveSlide(i, 1)} title="Move right">
-                            <Icon name="r" size={12} />
-                          </button>
-                        </div>
-                      </div>
-                      <span className={`${styles.pill} ${statusMeta.pill} ${styles.statusPill}`}>
-                        <Icon name={statusMeta.icon} size={11} /> {statusMeta.label}
-                      </span>
-                      <div className={styles.voteRow}>
-                        <button
-                          className={`${styles.voteBtn} ${myVote === "up" ? styles.voteBtnUpOn : ""}`}
-                          onClick={() => setVote(gp.photo.id, voterKey, "up")}
-                          title="You like this photo"
-                        >
-                          <Icon name="up" size={12} /> {ups}
-                        </button>
-                        <button
-                          className={`${styles.voteBtn} ${myVote === "down" ? styles.voteBtnDownOn : ""}`}
-                          onClick={() => setVote(gp.photo.id, voterKey, "down")}
-                          title="You don't like this photo"
-                        >
-                          <Icon name="down" size={12} /> {downs}
-                        </button>
-                      </div>
-                      {members.length > 0 && (
-                        <div className={styles.voteMembers}>
-                          {members.map((p) => {
-                            const v = voteMap[p.id];
-                            return (
-                              <button
-                                key={p.id}
-                                className={styles.voteMember}
-                                onClick={() => cycleMemberVote(gp.photo.id, p.id)}
-                                title={`${p.name}: ${v ?? "no vote"} (click to change)`}
-                              >
-                                <Avatar name={p.name} color={p.color} fg={p.fg} size="sm" />
-                                {v && <i className={v === "up" ? styles.voteTickUp : styles.voteTickDown} />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+            <div className={styles.carouselHead}>
+              <h3>Launch carousel</h3>
+              <span className={styles.hint}>
+                {slides.length} {slides.length === 1 ? "photo" : "photos"} · {inCount} in
+              </span>
+            </div>
+            <p className={styles.carouselRule}>A photo is in once it has {threshold}+ thumbs up.</p>
+            <div className={`${styles.carouselGrid} ${slidesDragOver ? styles.slideDropOver : ""}`}>
+              {slides.map((photo) => {
+                const voteMap = post.draft.votes[photo.id] ?? {};
+                const ups = Object.values(voteMap).filter((v) => v === "up").length;
+                const downs = Object.values(voteMap).filter((v) => v === "down").length;
+                const isIn = ups >= threshold;
+                return (
+                  <div key={photo.id} className={styles.voteCard}>
+                    <div className={`${styles.voteCardMedia} ${isIn ? styles.voteCardIn : ""}`}>
+                      <PhotoThumb photo={photo} />
+                      {isIn && <span className={styles.inBadge}>In</span>}
+                      <button className={styles.slideRemove} onClick={() => removeSlide(photo.id)} title="Remove">
+                        <Icon name="x" size={12} />
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    <div className={styles.voteRow2}>
+                      <button
+                        className={`${styles.voteBtn2} ${ups > downs ? styles.voteBtn2Up : ""}`}
+                        onClick={() => setVote(photo.id, voterKey, "up")}
+                        title="You like this photo"
+                      >
+                        <Icon name="up" size={13} /> {ups}
+                      </button>
+                      <button
+                        className={`${styles.voteBtn2} ${downs > ups ? styles.voteBtn2Down : ""}`}
+                        onClick={() => setVote(photo.id, voterKey, "down")}
+                        title="You don't like this photo"
+                      >
+                        <Icon name="down" size={13} /> {downs}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className={styles.dropHere}>Drop photos here</div>
+            </div>
+          </section>
+        </div>
 
-          <div className={styles.sectHead}>
-            <h3>Caption</h3>
-          </div>
-          <textarea
-            className={styles.captionBox}
-            value={project.post.caption}
-            onChange={(e) => onUpdatePost((post) => ({ ...post, caption: e.target.value }))}
-            placeholder="Write a caption. Tag people and brands with @."
-          />
+        <div className={styles.sectHead}>
+          <h3>Caption</h3>
+        </div>
+        <textarea
+          className={styles.captionBox}
+          value={post.draft.caption}
+          onChange={(e) => onUpdateDraft((draft) => ({ ...draft, caption: e.target.value }))}
+          placeholder="Write a caption. Tag people and brands with @."
+        />
 
-          <div className={styles.sectHead}>
-            <h3>Credits</h3>
-          </div>
-          {credits.length === 0 ? (
-            <p className={styles.hint}>Add photos to see who shot them.</p>
-          ) : (
-            <ul className={styles.creditsList}>
-              {credits.map((name) => (
-                <li key={name}>Shot by {name}</li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <div className={styles.sectHead}>
+          <h3>Credits</h3>
+        </div>
+        {credits.length === 0 ? (
+          <p className={styles.hint}>Add photos to see who shot them.</p>
+        ) : (
+          <ul className={styles.creditsList}>
+            {credits.map((name) => (
+              <li key={name}>Shot by {name}</li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {previewOpen ? (
-        <PreviewTray group={group} project={project} slides={slides} onClose={() => setPreviewOpen(false)} />
+        <PreviewTray group={group} post={post} slides={slides} onClose={() => setPreviewOpen(false)} />
       ) : (
         <button className={styles.previewReopen} onClick={() => setPreviewOpen(true)}>
           <Icon name="l" size={14} />
           <span>Preview</span>
         </button>
+      )}
+
+      {liveCursors && (
+        <div className={styles.cursorLayer}>
+          {Object.entries(cursors).map(([id, c]) => (
+            <div key={id} className={styles.remoteCursor} style={{ left: c.x, top: c.y }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={c.color} stroke="#fff" strokeWidth={1.2}>
+                <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
+              </svg>
+              <span className={styles.remoteCursorLabel} style={{ background: c.color }}>
+                {c.name}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </>
   );
@@ -1557,18 +1981,18 @@ function ProjectDetail({
 
 function PreviewTray({
   group,
-  project,
+  post,
   slides,
   onClose,
 }: {
   group: Group;
-  project: ProjectCard;
-  slides: GroupPhoto[];
+  post: PostCard;
+  slides: Photo[];
   onClose: () => void;
 }) {
   const [pvIndex, setPvIndex] = useState(0);
   const activeIndex = Math.min(pvIndex, Math.max(0, slides.length - 1));
-  const handle = group.account.replace(/^@/, "");
+  const handle = primaryHandle(group).replace(/^@/, "");
 
   return (
     <aside className={styles.previewTray}>
@@ -1590,7 +2014,7 @@ function PreviewTray({
             <PhotoThumb photo={null} />
           ) : (
             <>
-              <PhotoThumb photo={slides[activeIndex].photo} />
+              <PhotoThumb photo={slides[activeIndex]} />
               {slides.length > 1 && (
                 <>
                   <button className={`${styles.pvNav} ${styles.pvNavL}`} disabled={activeIndex === 0} onClick={() => setPvIndex((i) => Math.max(0, i - 1))}>
@@ -1619,73 +2043,187 @@ function PreviewTray({
           <Icon name="send" size={20} />
         </div>
         <div className={styles.pvCaption}>
-          <b>{handle}</b> {project.post.caption || <span className={styles.hint}>No caption yet</span>}
+          <b>{handle}</b> {post.draft.caption || <span className={styles.hint}>No caption yet</span>}
         </div>
       </div>
     </aside>
   );
 }
 
-function MediaDrawer({
+function MediaPage({
   group,
-  activeProjectId,
-  onAddToActive,
-  onClose,
+  onAddMedia,
+  onCreateFolder,
+  onDeleteFolder,
+  onMoveToFolder,
+  onAddToPost,
 }: {
   group: Group;
-  activeProjectId: string | null;
-  onAddToActive: ((photoId: string) => void) | null;
-  onClose: () => void;
+  onAddMedia: (files: FileList, folderId?: string | null) => void;
+  onCreateFolder: (name: string) => void;
+  onDeleteFolder: (folderId: string) => void;
+  onMoveToFolder: (photoId: string, folderId: string | null) => void;
+  onAddToPost: (postId: string, photoId: string) => void;
 }) {
-  const pool = groupPhotoPool(group);
-  const activeProject = activeProjectId ? group.projects.find((p) => p.id === activeProjectId) ?? null : null;
-  const slideIds = activeProject?.post.slideIds ?? [];
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [activeFolder, setActiveFolder] = useState("all");
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderDragOver, setFolderDragOver] = useState<string | null>(null);
+  const [postDragOver, setPostDragOver] = useState<string | null>(null);
+
+  const pool = groupMediaPool(group);
+  const shown = activeFolder === "all" ? pool : activeFolder === "unsorted" ? pool.filter((p) => !p.folderId) : pool.filter((p) => p.folderId === activeFolder);
+  const notPosted = group.posts.filter((p) => !p.posted);
+
+  const submitFolder = (e: FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    onCreateFolder(newFolderName.trim());
+    setNewFolderName("");
+  };
+
+  const uploadFolderId = activeFolder === "all" || activeFolder === "unsorted" ? null : activeFolder;
 
   return (
-    <aside className={styles.drawer}>
-      <div className={styles.drawerHead}>
-        <div>
-          <b>Media</b>
-          <div className={styles.hint}>
-            {group.name} · {pool.length} {pool.length === 1 ? "photo" : "photos"}
+    <div className={styles.home}>
+      <h1>{group.name} · Media</h1>
+      <p>
+        {pool.length} {pool.length === 1 ? "photo" : "photos"}
+      </p>
+
+      {notPosted.length > 0 && (
+        <div className={styles.addToPostRow}>
+          <span className={styles.chipLabel}>Drag a photo onto a post below to add it</span>
+          <div className={styles.addToPostList}>
+            {notPosted.map((post) => (
+              <div
+                key={post.id}
+                className={`${styles.addToPostChip} ${postDragOver === post.id ? styles.addToPostChipOver : ""}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setPostDragOver(post.id);
+                }}
+                onDragLeave={() => setPostDragOver((id) => (id === post.id ? null : id))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setPostDragOver(null);
+                  const id = e.dataTransfer.getData("text/plain");
+                  if (id) onAddToPost(post.id, id);
+                }}
+              >
+                <Icon name="folder" size={13} /> {post.name}
+              </div>
+            ))}
           </div>
         </div>
-        <button className={styles.iconClose} onClick={onClose} title="Close">
-          <Icon name="x" size={16} />
-        </button>
-      </div>
-      <p className={styles.traySub}>
-        {activeProject
-          ? `Drag a photo onto "${activeProject.name}", or click to add it.`
-          : "Open a project, or drop a photo onto one from the Projects grid."}
-      </p>
-      {pool.length === 0 ? (
-        <p className={styles.emptyTray}>No photos in {group.name} yet.</p>
-      ) : (
-        <div className={styles.drawerGrid}>
-          {pool.map((gp) => {
-            const included = slideIds.includes(gp.photo.id);
-            return (
-              <button
-                key={gp.photo.id}
-                className={`${styles.trayThumb} ${included ? styles.trayThumbOn : ""}`}
-                draggable
-                onDragStart={(e) => e.dataTransfer.setData("text/plain", gp.photo.id)}
-                onClick={() => onAddToActive?.(gp.photo.id)}
-                title={gp.photo.name}
-              >
-                <PhotoThumb photo={gp.photo} />
-                {included && (
-                  <span className={styles.trayCheck}>
-                    <Icon name="check" size={12} />
-                  </span>
-                )}
-                <span className={styles.trayTag}>{gp.projectName}</span>
-              </button>
-            );
-          })}
-        </div>
       )}
-    </aside>
+
+      <div className={styles.mediaLayout}>
+        <aside className={styles.folderList}>
+          <button className={`${styles.folderRow} ${activeFolder === "all" ? styles.folderRowOn : ""}`} onClick={() => setActiveFolder("all")}>
+            <Icon name="layers" size={14} />
+            <span className={styles.folderRowName}>All media</span>
+            <span className={styles.hint}>{pool.length}</span>
+          </button>
+          <button
+            className={`${styles.folderRow} ${activeFolder === "unsorted" ? styles.folderRowOn : ""} ${folderDragOver === "unsorted" ? styles.folderRowDrop : ""}`}
+            onClick={() => setActiveFolder("unsorted")}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setFolderDragOver("unsorted");
+            }}
+            onDragLeave={() => setFolderDragOver((f) => (f === "unsorted" ? null : f))}
+            onDrop={(e) => {
+              e.preventDefault();
+              setFolderDragOver(null);
+              const id = e.dataTransfer.getData("text/plain");
+              if (id) onMoveToFolder(id, null);
+            }}
+          >
+            <Icon name="image" size={14} />
+            <span className={styles.folderRowName}>Unsorted</span>
+            <span className={styles.hint}>{pool.filter((p) => !p.folderId).length}</span>
+          </button>
+          {group.folders.map((folder) => (
+            <button
+              key={folder.id}
+              className={`${styles.folderRow} ${activeFolder === folder.id ? styles.folderRowOn : ""} ${folderDragOver === folder.id ? styles.folderRowDrop : ""}`}
+              onClick={() => setActiveFolder(folder.id)}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setFolderDragOver(folder.id);
+              }}
+              onDragLeave={() => setFolderDragOver((f) => (f === folder.id ? null : f))}
+              onDrop={(e) => {
+                e.preventDefault();
+                setFolderDragOver(null);
+                const id = e.dataTransfer.getData("text/plain");
+                if (id) onMoveToFolder(id, folder.id);
+              }}
+            >
+              <Icon name="folder" size={14} />
+              <span className={styles.folderRowName}>{folder.name}</span>
+              <span className={styles.hint}>{pool.filter((p) => p.folderId === folder.id).length}</span>
+              <span
+                role="button"
+                tabIndex={0}
+                className={styles.folderDelete}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteFolder(folder.id);
+                }}
+                title="Delete folder"
+              >
+                <Icon name="x" size={12} />
+              </span>
+            </button>
+          ))}
+          <form className={styles.newFolderRow} onSubmit={submitFolder}>
+            <input className={styles.input} value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder="New folder" />
+            <button type="submit" className={styles.iconClose} title="Create folder" disabled={!newFolderName.trim()}>
+              <Icon name="plus" size={14} />
+            </button>
+          </form>
+        </aside>
+
+        <div className={styles.mediaMain}>
+          <div className={styles.panelHead}>
+            <span className={styles.hint}>Drag a photo onto a folder on the left to sort it</span>
+            <button className={styles.btnGhost2} onClick={() => fileRef.current?.click()}>
+              <Icon name="plus" size={14} /> Add photos
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) onAddMedia(e.target.files, uploadFolderId);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          {shown.length === 0 ? (
+            <p className={styles.emptyTray}>No photos here yet.</p>
+          ) : (
+            <div className={styles.drawerGrid}>
+              {shown.map((photo) => (
+                <div
+                  key={photo.id}
+                  className={styles.trayThumb}
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData("text/plain", photo.id)}
+                  title={photo.name}
+                >
+                  <PhotoThumb photo={photo} />
+                  <span className={styles.trayTag}>{photo.uploadedBy}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

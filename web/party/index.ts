@@ -9,6 +9,7 @@ import {
   type Player,
   type ServerMessage,
 } from "../lib/gameTypes";
+import type { PostitClientMessage } from "../lib/postitRealtimeTypes";
 
 function shuffledOrder(): number[] {
   const order = Array.from({ length: TILE_COUNT }, (_, i) => i);
@@ -222,6 +223,42 @@ export class SpectrumRoom extends Server {
       totalCompleted: this.totalCompleted,
       completedToday: this.completedToday,
     };
+  }
+}
+
+export class PostitRoom extends Server {
+  players = new Map<string, { name: string; color: string }>();
+
+  onClose(connection: Connection) {
+    this.players.delete(connection.id);
+    this.broadcastPresence();
+  }
+
+  onMessage(connection: Connection, raw: string | ArrayBuffer | ArrayBufferView) {
+    if (typeof raw !== "string") return;
+    let msg: PostitClientMessage;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    if (msg.type === "join") {
+      this.players.set(connection.id, { name: msg.name.trim().slice(0, 40) || "Teammate", color: msg.color });
+      this.broadcastPresence();
+    } else if (msg.type === "cursor") {
+      const player = this.players.get(connection.id);
+      if (!player) return;
+      this.broadcast(
+        JSON.stringify({ type: "cursor", playerId: connection.id, x: msg.x, y: msg.y, color: player.color, name: player.name }),
+        [connection.id]
+      );
+    }
+  }
+
+  broadcastPresence() {
+    const players = [...this.players.entries()].map(([id, p]) => ({ id, ...p }));
+    this.broadcast(JSON.stringify({ type: "presence", players }));
   }
 }
 
