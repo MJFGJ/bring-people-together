@@ -262,6 +262,33 @@ export class PostitRoom extends Server {
   }
 }
 
+// Shares the whole Postit `groups` tree across every visitor to the site —
+// whoever connects gets the last-synced snapshot, and every client just
+// pushes its full local copy back up on every change (last write wins; this
+// is a quick-and-dirty prototype for user testing, not a CRDT).
+export class PostitAppRoom extends Server {
+  async onConnect(connection: Connection) {
+    const stored = await this.ctx.storage.get<unknown>("groups");
+    if (stored !== undefined) {
+      connection.send(JSON.stringify({ type: "sync", groups: stored }));
+    }
+  }
+
+  async onMessage(connection: Connection, raw: string | ArrayBuffer | ArrayBufferView) {
+    if (typeof raw !== "string") return;
+    let msg: { type?: string; groups?: unknown };
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (msg.type === "sync" && msg.groups !== undefined) {
+      await this.ctx.storage.put("groups", msg.groups);
+      this.broadcast(raw, [connection.id]);
+    }
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env) {
     return (await routePartykitRequest(request, env)) || new Response("Not found", { status: 404 });

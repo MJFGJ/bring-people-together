@@ -73,19 +73,24 @@ interface Draft {
   slideIds: string[];
   caption: string;
   votes: Record<string, Record<string, Vote>>;
+  location?: string;
+  hideLikeCount?: boolean;
+  commentsOff?: boolean;
+  instagramAccountId?: string | null;
 }
 
 interface PostCard {
   id: string;
   name: string;
   date: string;
+  folderId: string;
   drafts: number;
   ready: number;
   pending: number;
   draft: Draft;
   posted: boolean;
   postedAt: number | null;
-  requested: boolean;
+  scheduledFor: number | null;
 }
 
 function groupMediaPool(group: Group): Photo[] {
@@ -191,7 +196,7 @@ function primaryHandle(group: Group): string {
   return group.instagramAccounts[0]?.handle ?? "Not linked";
 }
 
-function makeSeedPhotos(count: number, members: string[], startAgoMin: number): Photo[] {
+function makeSeedPhotos(count: number, members: string[], startAgoMin: number, folderId: string | null = null): Photo[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `seed-${startAgoMin}-${i}`,
     name: `IMG_${1000 + i}.jpg`,
@@ -199,16 +204,40 @@ function makeSeedPhotos(count: number, members: string[], startAgoMin: number): 
     tone: (i * 37 + 20) % 80 + 10,
     uploadedBy: members.length ? byId(members[i % members.length]).name : "Team",
     at: Date.now() - (startAgoMin - i) * 60000,
-    folderId: null,
+    folderId,
   }));
 }
 
 const GROUP_COLORS = ["#E4572E", "#2F6FEB", "#13A06B", "#8B5CF6", "#E3A008", "#D2433F", "#0E9F9F"];
 
+// A synced snapshot could come from a stale client, a bad write, or just not
+// exist yet — rather than trust it blindly (and crash every viewer on one bad
+// write, since there's no schema enforcement on the shared store), check it
+// looks like real Group data before adopting it. An invalid snapshot is
+// treated the same as "nothing synced yet," so the next client to connect
+// reseeds the room with good data.
+function isValidGroupsSnapshot(data: unknown): data is Group[] {
+  return (
+    Array.isArray(data) &&
+    data.every(
+      (g) =>
+        g &&
+        typeof g === "object" &&
+        typeof g.id === "string" &&
+        typeof g.name === "string" &&
+        Array.isArray(g.members) &&
+        Array.isArray(g.posts) &&
+        Array.isArray(g.media) &&
+        Array.isArray(g.folders) &&
+        Array.isArray(g.instagramAccounts)
+    )
+  );
+}
+
 function makeInitialGroups(): Group[] {
-  const lookbookPhotos = makeSeedPhotos(13, ["jordan", "lena", "maya"], 70);
-  const cafePhotos = makeSeedPhotos(9, ["maya", "sam"], 48);
-  const btsPhotos = makeSeedPhotos(6, ["sam", "lena", "jordan"], 30);
+  const lookbookPhotos = makeSeedPhotos(13, ["jordan", "lena", "maya"], 70, "folder-p1");
+  const cafePhotos = makeSeedPhotos(9, ["maya", "sam"], 48, "folder-p2");
+  const btsPhotos = makeSeedPhotos(6, ["sam", "lena", "jordan"], 30, "folder-p3");
   return [
     {
       id: "ribbonclub",
@@ -217,12 +246,13 @@ function makeInitialGroups(): Group[] {
       members: [memberFromPerson("jordan", "admin"), memberFromPerson("lena", "member"), memberFromPerson("maya", "member")],
       instagramAccounts: [{ id: "ig-ribbonclub", handle: "@ribbonclub" }],
       media: lookbookPhotos,
-      folders: [],
+      folders: [{ id: "folder-p1", name: "Lookbook Shoot" }],
       posts: [
         {
           id: "p1",
           name: "Lookbook Shoot",
           date: "Shot Nov 8",
+          folderId: "folder-p1",
           drafts: 3,
           ready: 1,
           pending: 2,
@@ -237,7 +267,7 @@ function makeInitialGroups(): Group[] {
           },
           posted: false,
           postedAt: null,
-          requested: false,
+          scheduledFor: null,
         },
       ],
       chat: [
@@ -257,19 +287,20 @@ function makeInitialGroups(): Group[] {
       members: [memberFromPerson("maya", "admin"), memberFromPerson("sam", "member")],
       instagramAccounts: [{ id: "ig-riverfront", handle: "@riverfrontcafe" }],
       media: cafePhotos,
-      folders: [],
+      folders: [{ id: "folder-p2", name: "Café Opening" }],
       posts: [
         {
           id: "p2",
           name: "Café Opening",
           date: "Shot Nov 2",
+          folderId: "folder-p2",
           drafts: 1,
           ready: 1,
           pending: 0,
           draft: { slideIds: [cafePhotos[1].id], caption: "We're open! First latte is on us this weekend.", votes: { [cafePhotos[1].id]: { maya: "up", sam: "up" } } },
           posted: true,
           postedAt: Date.now() - 2 * 24 * 60 * 60000,
-          requested: false,
+          scheduledFor: null,
         },
       ],
       chat: [
@@ -289,29 +320,26 @@ function makeInitialGroups(): Group[] {
       members: [memberFromPerson("sam", "admin"), memberFromPerson("lena", "member"), memberFromPerson("jordan", "member"), memberFromPerson("theo", "member")],
       instagramAccounts: [],
       media: btsPhotos,
-      folders: [],
+      folders: [{ id: "folder-p3", name: "Studio BTS" }],
       posts: [
         {
           id: "p3",
           name: "Studio BTS",
           date: "Ongoing",
+          folderId: "folder-p3",
           drafts: 0,
           ready: 0,
           pending: 0,
           draft: { slideIds: [], caption: "", votes: {} },
           posted: false,
           postedAt: null,
-          requested: false,
+          scheduledFor: null,
         },
       ],
       chat: [],
       activity: [{ id: "a1", at: Date.now() - 20 * 60000, actorName: "Sam Okafor", color: "#13A06B", fg: "#fff", verb: "created the post", target: "Studio BTS", icon: "folder" }],
     },
   ];
-}
-
-function revokeBlobUrls(groups: Group[]) {
-  for (const g of groups) for (const ph of g.media) if (ph.url?.startsWith("blob:")) URL.revokeObjectURL(ph.url);
 }
 
 const slugify = (s: string) =>
@@ -396,6 +424,7 @@ interface Toast {
 }
 
 interface CurrentUser {
+  id: string;
   name: string;
   email: string;
   username: string;
@@ -422,6 +451,45 @@ export default function PostitPage() {
   const [stage, setStage] = useState<Stage>("signup");
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [groups, setGroups] = useState<Group[]>(makeInitialGroups);
+  const receivedServerSync = useRef(false);
+  // Mirrors `groups` synchronously (unlike React state, which only updates on
+  // the next render) so that several updateGroup calls made back-to-back
+  // within one handler each build on the last instead of clobbering it.
+  const groupsRef = useRef(groups);
+
+  const syncSocket = usePartySocket({
+    host: process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:8788",
+    party: "postit-app",
+    room: "global",
+    onOpen() {
+      // If nobody else has ever synced a "groups" snapshot yet, seed the
+      // shared room with this client's local demo data so everyone who
+      // connects after us starts from the same place.
+      setTimeout(() => {
+        if (!receivedServerSync.current) {
+          syncSocket.send(JSON.stringify({ type: "sync", groups }));
+        }
+      }, 600);
+    },
+    onMessage(event) {
+      const msg: { type?: string; groups?: unknown } = JSON.parse(event.data);
+      if (msg.type === "sync" && isValidGroupsSnapshot(msg.groups)) {
+        receivedServerSync.current = true;
+        groupsRef.current = msg.groups;
+        setGroups(msg.groups);
+      }
+    },
+  });
+
+  const syncGroups = (next: Group[]) => {
+    syncSocket.send(JSON.stringify({ type: "sync", groups: next }));
+  };
+
+  const commitGroups = (next: Group[]) => {
+    groupsRef.current = next;
+    setGroups(next);
+    syncGroups(next);
+  };
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>("posts");
   const [activePostId, setActivePostId] = useState<string | null>(null);
@@ -455,7 +523,9 @@ export default function PostitPage() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
   };
 
-  const updateGroup = (id: string, fn: (g: Group) => Group) => setGroups((gs) => gs.map((g) => (g.id === id ? fn(g) : g)));
+  const updateGroup = (id: string, fn: (g: Group) => Group) => {
+    commitGroups(groupsRef.current.map((g) => (g.id === id ? fn(g) : g)));
+  };
 
   const pushActivity = (groupId: string, entry: Omit<ActivityItem, "id" | "at">) => {
     updateGroup(groupId, (g) => ({
@@ -465,7 +535,8 @@ export default function PostitPage() {
   };
 
   const handleSignUp = (name: string, email: string, username: string) => {
-    setUser({ name, email, username: normalizeHandle(username) || `@${slugify(name)}`, color: hashColor(email || name) });
+    const id = `u-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    setUser({ id, name, email, username: normalizeHandle(username) || `@${slugify(name)}`, color: hashColor(email || username || name) });
     setStage("connectInstagram");
   };
 
@@ -477,14 +548,10 @@ export default function PostitPage() {
 
   const ensureMembership = (groupId: string) => {
     if (!user) return;
-    setGroups((gs) =>
-      gs.map((g) => {
-        if (g.id !== groupId) return g;
-        if (g.members.some((m) => m.email && m.email === user.email)) return g;
-        const me: Member = { id: `me-${slugify(user.email || user.name)}`, name: user.name, email: user.email, username: user.username, role: "member", color: user.color, fg: "#fff" };
-        return { ...g, members: [...g.members, me] };
-      })
-    );
+    const group = groupsRef.current.find((g) => g.id === groupId);
+    if (!group || group.members.some((m) => m.id === user.id)) return;
+    const me: Member = { id: user.id, name: user.name, email: user.email, username: user.username, role: "member", color: user.color, fg: "#fff" };
+    commitGroups(groupsRef.current.map((g) => (g.id === groupId ? { ...g, members: [...g.members, me] } : g)));
   };
 
   const handleSelectGroup = (id: string) => {
@@ -500,21 +567,41 @@ export default function PostitPage() {
     if (!user) return;
     const id = `${slugify(name)}-${Date.now().toString(36)}`;
     const color = GROUP_COLORS[groups.length % GROUP_COLORS.length];
-    const me: Member = { id: `me-${slugify(user.email || user.name)}`, name: user.name, email: user.email, username: user.username, role: "admin", color: user.color, fg: "#fff" };
+    const me: Member = { id: user.id, name: user.name, email: user.email, username: user.username, role: "admin", color: user.color, fg: "#fff" };
     const members = [me, ...invitees];
-    const group: Group = { id, name, color, members, instagramAccounts, media: [], folders: [], posts: [], chat: [], activity: [] };
-    setGroups((g) => [...g, group]);
+    const makeActivityId = () => `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const activity: ActivityItem[] = [];
+    for (const m of invitees) {
+      activity.push({
+        id: makeActivityId(),
+        at: Date.now(),
+        actorName: user.name,
+        color: user.color,
+        fg: "#fff",
+        verb: `invited ${m.name} as ${m.role === "admin" ? "an admin" : "a team member"} to`,
+        target: name,
+        icon: "plus",
+      });
+    }
+    if (instagramAccounts.length) {
+      activity.push({
+        id: makeActivityId(),
+        at: Date.now(),
+        actorName: user.name,
+        color: user.color,
+        fg: "#fff",
+        verb: `linked ${instagramAccounts.map((a) => a.handle).join(", ")} to`,
+        target: name,
+        icon: "instagram",
+      });
+    }
+    const group: Group = { id, name, color, members, instagramAccounts, media: [], folders: [], posts: [], chat: [], activity: activity.reverse() };
+    commitGroups([...groupsRef.current, group]);
     setActiveGroupId(id);
     setScreen("posts");
     setActivePostId(null);
     setStage("app");
     setCreatingGroup(false);
-    for (const m of invitees) {
-      pushActivity(id, { actorName: user.name, color: user.color, fg: "#fff", verb: `invited ${m.name} as ${m.role === "admin" ? "an admin" : "a team member"} to`, target: name, icon: "plus" });
-    }
-    if (instagramAccounts.length) {
-      pushActivity(id, { actorName: user.name, color: user.color, fg: "#fff", verb: `linked ${instagramAccounts.map((a) => a.handle).join(", ")} to`, target: name, icon: "instagram" });
-    }
     pushToast(
       `Created <em>${name}</em>${invitees.length ? ` with ${invitees.length} teammate${invitees.length === 1 ? "" : "s"}` : ""}.${
         instagramAccounts.length ? "" : " Link an Instagram account before you post."
@@ -571,20 +658,23 @@ export default function PostitPage() {
   const handleCreatePost = (name: string, when: string) => {
     if (!activeGroupId) return;
     const id = `${slugify(name)}-${Date.now().toString(36)}`;
+    const folderId = `folder-${id}`;
     const date = when.trim() || `Added ${formatToday()}`;
     const post: PostCard = {
       id,
       name,
       date,
+      folderId,
       drafts: 0,
       ready: 0,
       pending: 0,
       draft: { slideIds: [], caption: "", votes: {} },
       posted: false,
       postedAt: null,
-      requested: false,
+      scheduledFor: null,
     };
-    updateGroup(activeGroupId, (g) => ({ ...g, posts: [...g.posts, post] }));
+    const folder: MediaFolder = { id: folderId, name };
+    updateGroup(activeGroupId, (g) => ({ ...g, posts: [...g.posts, post], folders: [...g.folders, folder] }));
     pushActivity(activeGroupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: "created the post", target: name, icon: "folder" });
     setActivePostId(id);
     setScreen("post");
@@ -651,7 +741,7 @@ export default function PostitPage() {
     const postName = groups.find((g) => g.id === activeGroupId)?.posts.find((p) => p.id === postId)?.name ?? "a post";
     updateGroup(activeGroupId, (g) => ({
       ...g,
-      posts: g.posts.map((p) => (p.id === postId ? { ...p, posted, postedAt: posted ? Date.now() : null, requested: false } : p)),
+      posts: g.posts.map((p) => (p.id === postId ? { ...p, posted, postedAt: posted ? Date.now() : null, scheduledFor: null } : p)),
     }));
     pushActivity(activeGroupId, {
       actorName: user?.name ?? "You",
@@ -662,14 +752,22 @@ export default function PostitPage() {
     });
   };
 
-  const handleRequestPost = (postId: string, postName: string) => {
+  const handleSchedule = (postId: string, scheduledFor: number) => {
     if (!activeGroupId) return;
+    const postName = groups.find((g) => g.id === activeGroupId)?.posts.find((p) => p.id === postId)?.name ?? "a post";
     updateGroup(activeGroupId, (g) => ({
       ...g,
-      posts: g.posts.map((p) => (p.id === postId ? { ...p, requested: true } : p)),
+      posts: g.posts.map((p) => (p.id === postId ? { ...p, scheduledFor, posted: false, postedAt: null } : p)),
     }));
-    pushActivity(activeGroupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: "asked an admin to approve", target: postName, icon: "check" });
-    pushToast(`Asked an admin to approve <em>${postName}</em>.`);
+    const when = new Date(scheduledFor).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    pushActivity(activeGroupId, {
+      actorName: user?.name ?? "You",
+      color: user?.color ?? "#888",
+      fg: "#fff",
+      verb: `scheduled ${postName} for ${when}`,
+      icon: "clock",
+    });
+    pushToast(`Scheduled <em>${postName}</em> for ${when}.`);
   };
 
   const handleDropPhotoOnPost = (postId: string, photoId: string) => {
@@ -678,7 +776,7 @@ export default function PostitPage() {
 
   const handleSendChat = (groupId: string, text: string) => {
     if (!user || !text.trim()) return;
-    const msg: ChatMessage = { id: `msg-${Date.now()}`, at: Date.now(), authorId: "me", authorName: user.name, color: user.color, fg: "#fff", text: text.trim() };
+    const msg: ChatMessage = { id: `msg-${Date.now()}`, at: Date.now(), authorId: user.id, authorName: user.name, color: user.color, fg: "#fff", text: text.trim() };
     updateGroup(groupId, (g) => ({ ...g, chat: [...g.chat, msg] }));
     const members = groups.find((g) => g.id === groupId)?.members ?? [];
     if (members.length > 0) {
@@ -703,13 +801,11 @@ export default function PostitPage() {
   };
 
   const handleSignOut = () => {
-    revokeBlobUrls(groups);
     setStage("signup");
     setUser(null);
     setActiveGroupId(null);
     setScreen("posts");
     setActivePostId(null);
-    setGroups(makeInitialGroups());
     setMenuOpen(false);
     setCreatingGroup(false);
     setCreatingPost(false);
@@ -770,7 +866,7 @@ export default function PostitPage() {
           onMoveToFolder={handleMoveToFolder}
           onUpdateDraft={handleUpdateDraft}
           onSetPosted={handleSetPosted}
-          onRequestPost={handleRequestPost}
+          onSchedule={handleSchedule}
           onDropPhotoOnPost={handleDropPhotoOnPost}
           onSendChat={(text) => handleSendChat(activeGroup.id, text)}
         />
@@ -800,9 +896,8 @@ function SignupScreen({ onSignUp }: { onSignUp: (name: string, email: string, us
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
 
-  const canSubmit = name.trim().length > 0 && email.trim().length > 0 && username.trim().length > 0 && password.length > 0;
+  const canSubmit = name.trim().length > 0;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -820,14 +915,16 @@ function SignupScreen({ onSignUp }: { onSignUp: (name: string, email: string, us
         <p className={styles.proto}>Prototype for user testing — nothing you type is sent anywhere.</p>
       </div>
       <form className={styles.loginCard} onSubmit={submit}>
-        <h2>Create your account</h2>
-        <p className={styles.sub}>Set up your profile. Linking Instagram comes next, but it&rsquo;s optional — handy if your team uses postit at work.</p>
+        <h2>Jump in</h2>
+        <p className={styles.sub}>Just your name gets you in. Email and a username are optional — add them if you want.</p>
         <div className={styles.field}>
           <label htmlFor="name">Name</label>
-          <input id="name" className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Jamie Rivera" autoComplete="name" />
+          <input id="name" className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Jamie Rivera" autoComplete="name" autoFocus />
         </div>
         <div className={styles.field}>
-          <label htmlFor="email">Email</label>
+          <label htmlFor="email">
+            Email <span className={styles.fieldNote}>(optional)</span>
+          </label>
           <input
             id="email"
             type="email"
@@ -839,20 +936,10 @@ function SignupScreen({ onSignUp }: { onSignUp: (name: string, email: string, us
           />
         </div>
         <div className={styles.field}>
-          <label htmlFor="username">Username</label>
+          <label htmlFor="username">
+            Username <span className={styles.fieldNote}>(optional)</span>
+          </label>
           <input id="username" className={styles.input} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="@jamie.rivera" autoComplete="username" />
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            className={styles.input}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            autoComplete="new-password"
-          />
         </div>
         <button type="submit" className={styles.btnPrimary} disabled={!canSubmit}>
           Continue
@@ -914,7 +1001,8 @@ function GroupPicker({
         </div>
         <p>You can belong to more than one group. Each group manages its own team and posts to its own linked Instagram accounts.</p>
         <p className={styles.proto}>
-          Signed in as {user.name} · {user.email} ·{" "}
+          Signed in as {user.name}
+          {user.email || user.username ? ` · ${user.email || user.username}` : ""} ·{" "}
           <button className={styles.signOutLink} onClick={onSignOut}>
             Sign out
           </button>
@@ -1285,7 +1373,7 @@ function AppShell({
   onMoveToFolder,
   onUpdateDraft,
   onSetPosted,
-  onRequestPost,
+  onSchedule,
   onDropPhotoOnPost,
   onSendChat,
 }: {
@@ -1313,14 +1401,14 @@ function AppShell({
   onMoveToFolder: (photoId: string, folderId: string | null) => void;
   onUpdateDraft: (postId: string, fn: (draft: Draft) => Draft) => void;
   onSetPosted: (postId: string, posted: boolean) => void;
-  onRequestPost: (postId: string, postName: string) => void;
+  onSchedule: (postId: string, scheduledFor: number) => void;
   onDropPhotoOnPost: (postId: string, photoId: string) => void;
   onSendChat: (text: string) => void;
 }) {
   const members = group.members;
   const first = user.name.trim().split(/\s+/)[0] || user.name;
   const activePost = group.posts.find((p) => p.id === activePostId) ?? null;
-  const isAdmin = group.members.find((m) => (m.email && m.email === user.email) || (m.username && m.username === user.username))?.role === "admin";
+  const isAdmin = group.members.find((m) => m.id === user.id)?.role === "admin";
   const canPost = group.instagramAccounts.length > 0;
 
   return (
@@ -1379,7 +1467,7 @@ function AppShell({
             <Avatar name={user.name} color={user.color} />
             <span>
               <b>{first}</b>
-              <small>{user.email}</small>
+              <small>{user.email || user.username}</small>
             </span>
             <Icon name="chev" size={14} />
           </button>
@@ -1449,7 +1537,7 @@ function AppShell({
               onAddMedia={onAddMedia}
               onUpdateDraft={(fn) => onUpdateDraft(activePost.id, fn)}
               onSetPosted={(posted) => onSetPosted(activePost.id, posted)}
-              onRequestPost={() => onRequestPost(activePost.id, activePost.name)}
+              onSchedule={(scheduledFor) => onSchedule(activePost.id, scheduledFor)}
               onDropPhoto={(photoId) => onDropPhotoOnPost(activePost.id, photoId)}
               onOpenInstagram={onOpenInstagram}
             />
@@ -1457,12 +1545,12 @@ function AppShell({
         </main>
       </div>
 
-      <ChatBubble key={group.id} group={group} onSend={onSendChat} />
+      <ChatBubble key={group.id} group={group} meId={user.id} onSend={onSendChat} />
     </div>
   );
 }
 
-function ChatBubble({ group, onSend }: { group: Group; onSend: (text: string) => void }) {
+function ChatBubble({ group, meId, onSend }: { group: Group; meId: string; onSend: (text: string) => void }) {
   const [open, setOpen] = useState(false);
   const [seenCount, setSeenCount] = useState(group.chat.length);
   const [text, setText] = useState("");
@@ -1507,7 +1595,7 @@ function ChatBubble({ group, onSend }: { group: Group; onSend: (text: string) =>
                   <Avatar name={m.authorName} color={m.color} fg={m.fg} size="sm" />
                   <div className={styles.chatPopupBody}>
                     <div className={styles.chatPopupMeta}>
-                      <b>{m.authorId === "me" ? "You" : m.authorName}</b>
+                      <b>{m.authorId === meId ? "You" : m.authorName}</b>
                       <span className={styles.hint}>{timeAgo(m.at)}</span>
                     </div>
                     <p>{m.text}</p>
@@ -1570,6 +1658,16 @@ function ActivityPanel({ group }: { group: Group }) {
 function postedLabel(postedAt: number | null): string {
   if (!postedAt) return "Posted";
   return `Posted ${new Date(postedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+function scheduledLabel(scheduledFor: number): string {
+  return `Scheduled ${new Date(scheduledFor).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+function toDatetimeLocal(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function PostsGrid({
@@ -1638,9 +1736,12 @@ function PostsGrid({
                       <span className={`${styles.pill} ${styles.pillOk}`}>
                         <Icon name="check" size={11} /> {postedLabel(post.postedAt)}
                       </span>
+                    ) : post.scheduledFor ? (
+                      <span className={`${styles.pill} ${styles.pillWarn}`}>
+                        <Icon name="clock" size={11} /> {scheduledLabel(post.scheduledFor)}
+                      </span>
                     ) : (
                       <>
-                        {post.requested && <span className={`${styles.pill} ${styles.pillWarn}`}>Requested</span>}
                         {post.ready > 0 && <span className={`${styles.pill} ${styles.pillOk}`}>{post.ready} ready to post</span>}
                         {post.pending > 0 && <span className={`${styles.pill} ${styles.pillWarn}`}>{post.pending} in progress</span>}
                       </>
@@ -1677,7 +1778,7 @@ function PostDetail({
   onAddMedia,
   onUpdateDraft,
   onSetPosted,
-  onRequestPost,
+  onSchedule,
   onDropPhoto,
   onOpenInstagram,
 }: {
@@ -1688,17 +1789,17 @@ function PostDetail({
   canPost: boolean;
   liveCursors: boolean;
   onToggleLiveCursors: () => void;
-  onAddMedia: (files: FileList) => void;
+  onAddMedia: (files: FileList, folderId?: string | null) => void;
   onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
   onSetPosted: (posted: boolean) => void;
-  onRequestPost: () => void;
+  onSchedule: (scheduledFor: number) => void;
   onDropPhoto: (photoId: string) => void;
   onOpenInstagram: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [slidesDragOver, setSlidesDragOver] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(true);
-  const voterKey = me.email;
+  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const voterKey = me.id;
   const members = group.members;
   const threshold = Math.max(1, Math.ceil(members.length / 2));
 
@@ -1772,12 +1873,9 @@ function PostDetail({
     return ups >= threshold;
   }).length;
 
-  const postDisabled = !isAdmin || (!post.posted && (slides.length === 0 || !canPost));
-  const postTitle = !isAdmin ? "Only admins can mark a post as posted" : !canPost && !post.posted ? "Link an Instagram account first" : undefined;
-
   return (
     <>
-      <div className={`${styles.home} ${previewOpen ? styles.previewGutter : ""}`}>
+      <div className={styles.home}>
         <div className={styles.projHead}>
           <div>
             <h1>{post.name}</h1>
@@ -1787,17 +1885,20 @@ function PostDetail({
             <span className={`${styles.pill} ${styles.pillOk}`}>
               <Icon name="check" size={11} /> {postedLabel(post.postedAt)}
             </span>
-          ) : post.requested ? (
-            <span className={`${styles.pill} ${styles.pillWarn}`}>Requested</span>
+          ) : post.scheduledFor ? (
+            <span className={`${styles.pill} ${styles.pillWarn}`}>
+              <Icon name="clock" size={11} /> {scheduledLabel(post.scheduledFor)}
+            </span>
           ) : null}
-          {!post.posted && (
-            <button className={styles.btnGhost2} disabled={post.requested || slides.length === 0} onClick={onRequestPost}>
-              {post.requested ? "Requested" : "Request to post"}
+          {post.posted ? (
+            <button className={styles.btnGhost2} onClick={() => onSetPosted(false)}>
+              Move back to drafts
+            </button>
+          ) : (
+            <button className={styles.btnSm} onClick={() => setFinalizeOpen(true)}>
+              <Icon name="send" size={14} /> Preview &amp; finalize
             </button>
           )}
-          <button className={styles.btnGhost2} disabled={postDisabled} title={postTitle} onClick={() => onSetPosted(!post.posted)}>
-            {post.posted ? "Move back to drafts" : "Mark as posted"}
-          </button>
           <button
             className={`${styles.btnGhost2} ${liveCursors ? styles.liveCursorsOn : ""}`}
             onClick={handleToggleLiveCursors}
@@ -1829,7 +1930,7 @@ function PostDetail({
                 multiple
                 hidden
                 onChange={(e) => {
-                  if (e.target.files) onAddMedia(e.target.files);
+                  if (e.target.files) onAddMedia(e.target.files, post.folderId);
                   e.target.value = "";
                 }}
               />
@@ -1929,16 +2030,6 @@ function PostDetail({
         </div>
 
         <div className={styles.sectHead}>
-          <h3>Caption</h3>
-        </div>
-        <textarea
-          className={styles.captionBox}
-          value={post.draft.caption}
-          onChange={(e) => onUpdateDraft((draft) => ({ ...draft, caption: e.target.value }))}
-          placeholder="Write a caption. Tag people and brands with @."
-        />
-
-        <div className={styles.sectHead}>
           <h3>Credits</h3>
         </div>
         {credits.length === 0 ? (
@@ -1952,13 +2043,19 @@ function PostDetail({
         )}
       </div>
 
-      {previewOpen ? (
-        <PreviewTray group={group} post={post} slides={slides} onClose={() => setPreviewOpen(false)} />
-      ) : (
-        <button className={styles.previewReopen} onClick={() => setPreviewOpen(true)}>
-          <Icon name="l" size={14} />
-          <span>Preview</span>
-        </button>
+      {finalizeOpen && (
+        <FinalizePostModal
+          group={group}
+          post={post}
+          slides={slides}
+          isAdmin={isAdmin}
+          canPost={canPost}
+          onUpdateDraft={onUpdateDraft}
+          onSetPosted={onSetPosted}
+          onSchedule={onSchedule}
+          onOpenInstagram={onOpenInstagram}
+          onClose={() => setFinalizeOpen(false)}
+        />
       )}
 
       {liveCursors && (
@@ -1979,74 +2076,216 @@ function PostDetail({
   );
 }
 
-function PreviewTray({
-  group,
-  post,
-  slides,
-  onClose,
-}: {
-  group: Group;
-  post: PostCard;
-  slides: Photo[];
-  onClose: () => void;
-}) {
+function InstagramPreviewCard({ group, post, slides }: { group: Group; post: PostCard; slides: Photo[] }) {
   const [pvIndex, setPvIndex] = useState(0);
   const activeIndex = Math.min(pvIndex, Math.max(0, slides.length - 1));
   const handle = primaryHandle(group).replace(/^@/, "");
 
   return (
-    <aside className={styles.previewTray}>
-      <div className={styles.drawerHead}>
-        <b>Preview</b>
-        <button className={styles.iconClose} onClick={onClose} title="Hide preview">
-          <Icon name="r" size={16} />
-        </button>
+    <div className={styles.pvCard}>
+      <div className={styles.pvHead}>
+        <span className={styles.groupIcon} style={{ "--c": group.color, width: "26px", height: "26px", borderRadius: "50%", fontSize: "10px" } as CSSProperties}>
+          {initials(group.name)}
+        </span>
+        <b>{handle}</b>
       </div>
-      <div className={styles.pvCard}>
-        <div className={styles.pvHead}>
-          <span className={styles.groupIcon} style={{ "--c": group.color, width: "26px", height: "26px", borderRadius: "50%", fontSize: "10px" } as CSSProperties}>
-            {initials(group.name)}
-          </span>
-          <b>{handle}</b>
+      <div className={styles.pvImage}>
+        {slides.length === 0 ? (
+          <PhotoThumb photo={null} />
+        ) : (
+          <>
+            <PhotoThumb photo={slides[activeIndex]} />
+            {slides.length > 1 && (
+              <>
+                <button className={`${styles.pvNav} ${styles.pvNavL}`} disabled={activeIndex === 0} onClick={() => setPvIndex((i) => Math.max(0, i - 1))}>
+                  <Icon name="l" size={14} />
+                </button>
+                <button
+                  className={`${styles.pvNav} ${styles.pvNavR}`}
+                  disabled={activeIndex === slides.length - 1}
+                  onClick={() => setPvIndex((i) => Math.min(slides.length - 1, i + 1))}
+                >
+                  <Icon name="r" size={14} />
+                </button>
+                <div className={styles.pvDots}>
+                  {slides.map((_, i) => (
+                    <i key={i} className={i === activeIndex ? styles.pvDotOn : styles.pvDot} />
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+      <div className={styles.pvIcons}>
+        <Icon name="heart" size={20} />
+        <Icon name="comment" size={20} />
+        <Icon name="send" size={20} />
+      </div>
+      <div className={styles.pvCaption}>
+        <b>{handle}</b> {post.draft.caption || <span className={styles.hint}>No caption yet</span>}
+      </div>
+      {post.draft.location && <div className={styles.pvLocation}>{post.draft.location}</div>}
+    </div>
+  );
+}
+
+function FinalizePostModal({
+  group,
+  post,
+  slides,
+  isAdmin,
+  canPost,
+  onUpdateDraft,
+  onSetPosted,
+  onSchedule,
+  onOpenInstagram,
+  onClose,
+}: {
+  group: Group;
+  post: PostCard;
+  slides: Photo[];
+  isAdmin: boolean;
+  canPost: boolean;
+  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
+  onSetPosted: (posted: boolean) => void;
+  onSchedule: (scheduledFor: number) => void;
+  onOpenInstagram: () => void;
+  onClose: () => void;
+}) {
+  const accounts = group.instagramAccounts;
+  const [mode, setMode] = useState<"now" | "later">(post.scheduledFor ? "later" : "now");
+  const [scheduleAt, setScheduleAt] = useState(() => toDatetimeLocal(post.scheduledFor ?? Date.now() + 60 * 60000));
+  const selectedAccountId = post.draft.instagramAccountId ?? accounts[0]?.id ?? "";
+
+  const disabled = !isAdmin || !canPost || slides.length === 0;
+  const disabledReason = !isAdmin
+    ? "Only admins can post"
+    : !canPost
+      ? "Link an Instagram account first"
+      : slides.length === 0
+        ? "Add at least one photo first"
+        : undefined;
+
+  const submit = () => {
+    if (disabled) return;
+    if (mode === "later") {
+      const ts = new Date(scheduleAt).getTime();
+      if (!Number.isFinite(ts)) return;
+      onSchedule(ts);
+    } else {
+      onSetPosted(true);
+    }
+    onClose();
+  };
+
+  return (
+    <div className={styles.overlay} onClick={onClose}>
+      <div className={`${styles.modal} ${styles.finalizeModal}`} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.finalizeHead}>
+          <h2>Preview &amp; finalize</h2>
+          <button className={styles.iconClose} onClick={onClose} title="Close">
+            <Icon name="x" size={16} />
+          </button>
         </div>
-        <div className={styles.pvImage}>
-          {slides.length === 0 ? (
-            <PhotoThumb photo={null} />
-          ) : (
-            <>
-              <PhotoThumb photo={slides[activeIndex]} />
-              {slides.length > 1 && (
-                <>
-                  <button className={`${styles.pvNav} ${styles.pvNavL}`} disabled={activeIndex === 0} onClick={() => setPvIndex((i) => Math.max(0, i - 1))}>
-                    <Icon name="l" size={14} />
-                  </button>
-                  <button
-                    className={`${styles.pvNav} ${styles.pvNavR}`}
-                    disabled={activeIndex === slides.length - 1}
-                    onClick={() => setPvIndex((i) => Math.min(slides.length - 1, i + 1))}
-                  >
-                    <Icon name="r" size={14} />
-                  </button>
-                  <div className={styles.pvDots}>
-                    {slides.map((_, i) => (
-                      <i key={i} className={i === activeIndex ? styles.pvDotOn : styles.pvDot} />
-                    ))}
-                  </div>
-                </>
+        <div className={styles.finalizeBody}>
+          <InstagramPreviewCard group={group} post={post} slides={slides} />
+          <div className={styles.finalizeOptions}>
+            <div className={styles.field}>
+              <label htmlFor="fcaption">Caption</label>
+              <textarea
+                id="fcaption"
+                className={styles.captionBox}
+                value={post.draft.caption}
+                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, caption: e.target.value }))}
+                placeholder="Write a caption. Tag people and brands with @."
+              />
+            </div>
+
+            {accounts.length > 0 ? (
+              <div className={styles.field}>
+                <label htmlFor="faccount">Post to</label>
+                <select
+                  id="faccount"
+                  className={styles.input}
+                  value={selectedAccountId}
+                  onChange={(e) => onUpdateDraft((draft) => ({ ...draft, instagramAccountId: e.target.value }))}
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.handle}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <button type="button" className={styles.linkIgHint} onClick={onOpenInstagram}>
+                <Icon name="instagram" size={12} /> Link an Instagram account to post
+              </button>
+            )}
+
+            <div className={styles.field}>
+              <label htmlFor="flocation">
+                Location <span className={styles.fieldNote}>(optional)</span>
+              </label>
+              <input
+                id="flocation"
+                className={styles.input}
+                value={post.draft.location ?? ""}
+                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, location: e.target.value }))}
+                placeholder="Add location"
+              />
+            </div>
+
+            <label className={styles.checkRow}>
+              <input
+                type="checkbox"
+                checked={!!post.draft.hideLikeCount}
+                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, hideLikeCount: e.target.checked }))}
+              />
+              Hide like count on this post
+            </label>
+            <label className={styles.checkRow}>
+              <input
+                type="checkbox"
+                checked={!!post.draft.commentsOff}
+                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, commentsOff: e.target.checked }))}
+              />
+              Turn off commenting
+            </label>
+
+            <div className={styles.field}>
+              <label>When</label>
+              <div className={styles.roleToggle}>
+                <button type="button" className={`${styles.roleBtn} ${mode === "now" ? styles.roleBtnOn : ""}`} onClick={() => setMode("now")}>
+                  Post now
+                </button>
+                <button type="button" className={`${styles.roleBtn} ${mode === "later" ? styles.roleBtnOn : ""}`} onClick={() => setMode("later")}>
+                  Schedule
+                </button>
+              </div>
+              {mode === "later" && (
+                <input
+                  type="datetime-local"
+                  className={styles.input}
+                  value={scheduleAt}
+                  onChange={(e) => setScheduleAt(e.target.value)}
+                />
               )}
-            </>
-          )}
-        </div>
-        <div className={styles.pvIcons}>
-          <Icon name="heart" size={20} />
-          <Icon name="comment" size={20} />
-          <Icon name="send" size={20} />
-        </div>
-        <div className={styles.pvCaption}>
-          <b>{handle}</b> {post.draft.caption || <span className={styles.hint}>No caption yet</span>}
+            </div>
+
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.btnGhost} onClick={onClose}>
+                Cancel
+              </button>
+              <button type="button" className={styles.btnPrimary} disabled={disabled} title={disabledReason} onClick={submit}>
+                {mode === "later" ? "Schedule post" : "Post now"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-    </aside>
+    </div>
   );
 }
 

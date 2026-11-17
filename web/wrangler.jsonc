@@ -12,6 +12,10 @@
       {
         "name": "Postit",
         "class_name": "PostitRoom"
+      },
+      {
+        "name": "PostitApp",
+        "class_name": "PostitAppRoom"
       }
     ]
   },
@@ -23,6 +27,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["PostitRoom"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["PostitAppRoom"]
     }
   ]
 }
