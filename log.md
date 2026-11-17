@@ -326,3 +326,10 @@ It was confusing to her about the approvals before finalizing and what that mean
 Also thought there was a lot of white space on the finalize part. 
 Mentioned adding a spot for quick cropping and resizing before you post. 
 
+
+2026-11-16
+
+- **Link to my changes**
+- **Alex Kramer**
+
+Link: https://claude.ai/artifact/4tL5R7QXoNAu513piaZoQD 
