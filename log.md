@@ -333,3 +333,28 @@ Mentioned adding a spot for quick cropping and resizing before you post.
 - **Alex Kramer**
 
 Link: https://claude.ai/artifact/4tL5R7QXoNAu513piaZoQD 
+
+2026-11-18
+
+- **Step-by-step posting and a planning board (my copy: /postit-alex)**
+- **Alex Kramer**
+
+I made my own copy of the site at web/app/postit-alex so I can try changes without changing the group's /postit page. The onboarding is the same.
+
+Step-by-step post flow (based on how Instagram makes a post, but kept in our branding):
+
+- A step bar at the top shows Photos, Details, and Review, with a check on each step you've finished. You can click back to earlier steps.
+- Step 1, Photos: upload media and vote on which photos go in the carousel.
+- Step 2, Details: three cards that fit on one screen.
+  - Caption & audio: caption with a character count, and music.
+  - Tags & location: tag teammates or other people, tag products, add a location.
+  - Sharing: which Instagram account, audience (Everyone or Close friends), also share on Facebook/Threads, hide likes, turn off comments, AI label.
+- Step 3, Review: a preview of what the post will look like on Instagram next to a summary of everything, with an Edit link on each line. You can post now or schedule it, and there's a "Post to @account?" confirm before it goes out.
+- I left out Instagram's editing step (filters, text, cropping) for now. We'll decide where it goes after seeing the whole flow. Sara also suggested quick cropping in user testing.
+
+Planning board (replaces the chat):
+
+- The chat button is now a Board button with a sticky-note icon. It opens a big board that almost fills the screen.
+- Drag sticky notes (4 colors) onto the board and type ideas in them. Notes can be moved and deleted, and each one shows who made it.
+- Pen tool with colors and sizes for drawing, an eraser, and undo.
+- Each group has its own board, saved with the group, so everyone in the group sees the same notes and drawings.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { usePartySocket } from "partysocket/react";
 import styles from "./postit.module.css";
 import type { PostitServerMessage } from "@/lib/postitRealtimeTypes";
@@ -77,6 +77,13 @@ interface Draft {
   hideLikeCount?: boolean;
   commentsOff?: boolean;
   instagramAccountId?: string | null;
+  audio?: string;
+  taggedPeople?: string[];
+  taggedProducts?: string[];
+  aiLabel?: boolean;
+  audience?: "everyone" | "close";
+  shareFacebook?: boolean;
+  shareThreads?: boolean;
 }
 
 interface PostCard {
@@ -158,6 +165,32 @@ interface ChatMessage {
   text: string;
 }
 
+interface BoardNote {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+  text: string;
+  authorName: string;
+  authorColor: string;
+}
+
+interface BoardStroke {
+  id: string;
+  color: string;
+  size: number;
+  points: [number, number][];
+  authorId: string;
+}
+
+interface Board {
+  notes: BoardNote[];
+  strokes: BoardStroke[];
+}
+
+const EMPTY_BOARD: Board = { notes: [], strokes: [] };
+
 interface ActivityItem {
   id: string;
   at: number;
@@ -189,6 +222,7 @@ interface Group {
   folders: MediaFolder[];
   posts: PostCard[];
   chat: ChatMessage[];
+  board?: Board;
   activity: ActivityItem[];
 }
 
@@ -381,6 +415,20 @@ const ICON_PATHS = {
   down: '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
   instagram: '<rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>',
   cursor: '<path d="M4 4l7.07 17 2.51-7.39L21 11.07z"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  bag: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+  pin: '<path d="M20 10c0 4.99-5.54 10.19-7.4 11.8a1 1 0 0 1-1.2 0C9.54 20.19 4 14.99 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  sparkle: '<path d="M12 3l1.9 5.6 5.6 1.9-5.6 1.9L12 18l-1.9-5.6-5.6-1.9 5.6-1.9Z"/><path d="M19 17v4"/><path d="M17 19h4"/>',
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
+  share: '<path d="M7 17 17 7"/><path d="M7 7h10v10"/>',
+  note: '<path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"/><path d="M15 3v4a2 2 0 0 0 2 2h4"/>',
+  pen: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+  eraser: '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+  pointer: '<path d="M12.586 12.586 19 19"/><path d="M3.688 3.037a.497.497 0 0 0-.651.651l6.5 15.999a.501.501 0 0 0 .947-.062l1.569-6.083a2 2 0 0 1 1.448-1.479l6.124-1.579a.5.5 0 0 0 .063-.947z"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 } as const;
 
 function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: number }) {
@@ -443,16 +491,6 @@ type Stage = "signup" | "connectInstagram" | "groups" | "app";
 type Screen = "posts" | "post" | "posted" | "media" | "activity";
 
 let toastId = 0;
-
-const CANNED_REPLIES = [
-  "On it!",
-  "Looks good to me 👍",
-  "Can someone grab a few more shots of this?",
-  "+1",
-  "Let's go with this one for the caption.",
-  "I'll upload what I have in a bit.",
-  "Great, thanks for the update!",
-];
 
 export default function PostitPage() {
   const [stage, setStage] = useState<Stage>("signup");
@@ -811,21 +849,8 @@ export default function PostitPage() {
     handleUpdateDraft(postId, (draft) => (draft.slideIds.includes(photoId) ? draft : { ...draft, slideIds: [...draft.slideIds, photoId] }));
   };
 
-  const handleSendChat = (groupId: string, text: string) => {
-    if (!user || !text.trim()) return;
-    const msg: ChatMessage = { id: `msg-${Date.now()}`, at: Date.now(), authorId: user.id, authorName: user.name, color: user.color, fg: "#fff", text: text.trim() };
-    updateGroup(groupId, (g) => ({ ...g, chat: [...g.chat, msg] }));
-    const members = groups.find((g) => g.id === groupId)?.members ?? [];
-    if (members.length > 0) {
-      const replier = members[Math.floor(Math.random() * members.length)];
-      const reply = CANNED_REPLIES[Math.floor(Math.random() * CANNED_REPLIES.length)];
-      setTimeout(() => {
-        updateGroup(groupId, (g) => ({
-          ...g,
-          chat: [...g.chat, { id: `msg-${Date.now()}-r`, at: Date.now(), authorId: replier.id, authorName: replier.name, color: replier.color, fg: replier.fg, text: reply }],
-        }));
-      }, 900 + Math.random() * 900);
-    }
+  const handleUpdateBoard = (groupId: string, fn: (board: Board) => Board) => {
+    updateGroup(groupId, (g) => ({ ...g, board: fn(g.board ?? EMPTY_BOARD) }));
   };
 
   const handleSwitchGroup = () => {
@@ -913,7 +938,7 @@ export default function PostitPage() {
           onSchedule={handleSchedule}
           onDropPhotoOnPost={handleDropPhotoOnPost}
           onDeletePost={(postId) => handleDeletePost(activeGroup.id, postId)}
-          onSendChat={(text) => handleSendChat(activeGroup.id, text)}
+          onUpdateBoard={(fn) => handleUpdateBoard(activeGroup.id, fn)}
         />
       )}
 
@@ -1452,7 +1477,7 @@ function AppShell({
   onSchedule,
   onDropPhotoOnPost,
   onDeletePost,
-  onSendChat,
+  onUpdateBoard,
 }: {
   user: CurrentUser;
   group: Group;
@@ -1481,7 +1506,7 @@ function AppShell({
   onSchedule: (postId: string, scheduledFor: number) => void;
   onDropPhotoOnPost: (postId: string, photoId: string) => void;
   onDeletePost: (postId: string) => void;
-  onSendChat: (text: string) => void;
+  onUpdateBoard: (fn: (board: Board) => Board) => void;
 }) {
   const members = group.members;
   const first = user.name.trim().split(/\s+/)[0] || user.name;
@@ -1671,6 +1696,7 @@ function AppShell({
           )}
           {screen === "post" && activePost && (
             <PostDetail
+              key={activePost.id}
               group={group}
               post={activePost}
               me={user}
@@ -1687,7 +1713,7 @@ function AppShell({
         </main>
       </div>
 
-      <ChatBubble key={group.id} group={group} meId={user.id} onSend={onSendChat} />
+      <PlanningBoard key={group.id} group={group} me={user} onChange={onUpdateBoard} />
 
       {liveCursors && (
         <div className={styles.cursorLayer}>
@@ -1707,72 +1733,357 @@ function AppShell({
   );
 }
 
-function ChatBubble({ group, meId, onSend }: { group: Group; meId: string; onSend: (text: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [seenCount, setSeenCount] = useState(group.chat.length);
-  const [text, setText] = useState("");
+const BOARD_W = 3200;
+const BOARD_H = 2000;
+const NOTE_W = 190;
+const NOTE_COLORS = [
+  { name: "Yellow", value: "#fff1a8" },
+  { name: "Pink", value: "#ffd3e0" },
+  { name: "Blue", value: "#cfe2ff" },
+  { name: "Green", value: "#d3f4d1" },
+];
+const PEN_COLORS = ["#1f1f1f", "#1a73e8", "#d93025", "#1e8e3e", "#e37400"];
+const PEN_SIZES = [3, 6, 12];
 
-  if (open && seenCount !== group.chat.length) {
-    setSeenCount(group.chat.length);
+type BoardTool = "select" | "pen" | "eraser";
+
+function strokeToPath(points: [number, number][]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) {
+    const [x, y] = points[0];
+    return `M${x} ${y}L${x + 0.1} ${y}`;
   }
+  let d = `M${points[0][0]} ${points[0][1]}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const [x, y] = points[i];
+    const [nx, ny] = points[i + 1];
+    d += `Q${x} ${y} ${(x + nx) / 2} ${(y + ny) / 2}`;
+  }
+  const last = points[points.length - 1];
+  return d + `L${last[0]} ${last[1]}`;
+}
 
-  const unread = open ? 0 : Math.max(0, group.chat.length - seenCount);
+function PlanningBoard({ group, me, onChange }: { group: Group; me: CurrentUser; onChange: (fn: (board: Board) => Board) => void }) {
+  const [open, setOpen] = useState(false);
+  const board = group.board ?? EMPTY_BOARD;
 
-  const toggle = () => {
-    setOpen((v) => {
-      const next = !v;
-      if (next) setSeenCount(group.chat.length);
-      return next;
-    });
-  };
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!text.trim()) return;
-    onSend(text);
-    setText("");
-  };
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !(e.target instanceof HTMLTextAreaElement)) setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   return (
-    <div className={styles.chatWidget}>
-      {open && (
-        <div className={styles.chatPopup}>
-          <div className={styles.chatPopupHead}>
-            <b>{group.name} chat</b>
-            <button className={styles.iconClose} onClick={() => setOpen(false)} title="Close">
-              <Icon name="x" size={16} />
-            </button>
-          </div>
-          <div className={styles.chatPopupList}>
-            {group.chat.length === 0 ? (
-              <p className={styles.hint}>No messages yet. Say hello.</p>
-            ) : (
-              group.chat.map((m) => (
-                <div key={m.id} className={styles.chatPopupMsg}>
-                  <Avatar name={m.authorName} color={m.color} fg={m.fg} size="sm" />
-                  <div className={styles.chatPopupBody}>
-                    <div className={styles.chatPopupMeta}>
-                      <b>{m.authorId === meId ? "You" : m.authorName}</b>
-                      <span className={styles.hint}>{timeAgo(m.at)}</span>
-                    </div>
-                    <p>{m.text}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-          <form className={styles.chatPopupInputRow} onSubmit={submit}>
-            <input className={styles.input} value={text} onChange={(e) => setText(e.target.value)} placeholder="Message the group…" />
-            <button type="submit" className={styles.btnSm} disabled={!text.trim()}>
-              <Icon name="send" size={14} />
-            </button>
-          </form>
+    <>
+      {open && <BoardSpace group={group} board={board} me={me} onChange={onChange} onClose={() => setOpen(false)} />}
+      {!open && (
+        <div className={styles.chatWidget}>
+          <button className={styles.chatFab} onClick={() => setOpen(true)} title="Planning board" aria-label="Open planning board">
+            <Icon name="note" size={22} />
+            {board.notes.length > 0 && <span className={`${styles.chatBadge} ${styles.boardBadge}`}>{board.notes.length}</span>}
+          </button>
         </div>
       )}
-      <button className={styles.chatFab} onClick={toggle} title="Chat">
-        <Icon name={open ? "x" : "chat"} size={22} />
-        {unread > 0 && <span className={styles.chatBadge}>{unread}</span>}
-      </button>
+    </>
+  );
+}
+
+function BoardSpace({
+  group,
+  board,
+  me,
+  onChange,
+  onClose,
+}: {
+  group: Group;
+  board: Board;
+  me: CurrentUser;
+  onChange: (fn: (board: Board) => Board) => void;
+  onClose: () => void;
+}) {
+  const [tool, setTool] = useState<BoardTool>("select");
+  const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  const [penSize, setPenSize] = useState(PEN_SIZES[0]);
+  const [drawing, setDrawing] = useState<[number, number][] | null>(null);
+  const [drag, setDrag] = useState<{ id: string; x: number; y: number; dx: number; dy: number } | null>(null);
+  const [ghost, setGhost] = useState<{ color: string; cx: number; cy: number } | null>(null);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
+  const erasingRef = useRef(false);
+
+  const toBoard = (clientX: number, clientY: number) => {
+    const r = surfaceRef.current!.getBoundingClientRect();
+    return { x: Math.round(clientX - r.left), y: Math.round(clientY - r.top) };
+  };
+  const topZ = board.notes.reduce((m, n) => Math.max(m, n.z), 0);
+
+  const addNote = (color: string, x: number, y: number) => {
+    const id = `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const note: BoardNote = {
+      id,
+      color,
+      text: "",
+      x: Math.max(0, Math.min(BOARD_W - NOTE_W, Math.round(x - NOTE_W / 2))),
+      y: Math.max(0, Math.min(BOARD_H - 160, Math.round(y - 20))),
+      z: topZ + 1,
+      authorName: me.name,
+      authorColor: me.color,
+    };
+    onChange((b) => ({ ...b, notes: [...b.notes, note] }));
+    setFocusId(id);
+    setTool("select");
+  };
+  const updateNote = (id: string, patch: Partial<BoardNote>) => onChange((b) => ({ ...b, notes: b.notes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }));
+  const deleteNote = (id: string) => onChange((b) => ({ ...b, notes: b.notes.filter((n) => n.id !== id) }));
+  const eraseStroke = (id: string) => onChange((b) => ({ ...b, strokes: b.strokes.filter((s) => s.id !== id) }));
+  const myLastStroke = [...board.strokes].reverse().find((s) => s.authorId === me.id);
+
+  /* ---- drag a new note out of the tray ---- */
+  const startTrayDrag = (e: ReactPointerEvent, color: string) => {
+    e.preventDefault();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let moved = false;
+    setGhost({ color, cx: sx, cy: sy });
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 4) moved = true;
+      setGhost({ color, cx: ev.clientX, cy: ev.clientY });
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setGhost(null);
+      const view = viewRef.current!.getBoundingClientRect();
+      if (!moved) {
+        // a plain click drops the note in the middle of what you're looking at
+        const p = toBoard(view.left + view.width / 2, view.top + view.height / 2);
+        addNote(color, p.x, p.y);
+        return;
+      }
+      const inside = ev.clientX > view.left && ev.clientX < view.right && ev.clientY > view.top && ev.clientY < view.bottom;
+      if (inside) {
+        const p = toBoard(ev.clientX, ev.clientY);
+        addNote(color, p.x, p.y);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /* ---- move an existing note ---- */
+  const startNoteDrag = (e: ReactPointerEvent, note: BoardNote) => {
+    if (tool !== "select" || (e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    const p = toBoard(e.clientX, e.clientY);
+    const dx = p.x - note.x;
+    const dy = p.y - note.y;
+    if (note.z !== topZ) updateNote(note.id, { z: topZ + 1 });
+    let cur = { x: note.x, y: note.y };
+    setDrag({ id: note.id, x: note.x, y: note.y, dx, dy });
+    const move = (ev: PointerEvent) => {
+      const q = toBoard(ev.clientX, ev.clientY);
+      cur = { x: Math.max(0, Math.min(BOARD_W - NOTE_W, q.x - dx)), y: Math.max(0, Math.min(BOARD_H - 60, q.y - dy)) };
+      setDrag({ id: note.id, ...cur, dx, dy });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDrag(null);
+      if (cur.x !== note.x || cur.y !== note.y) updateNote(note.id, cur);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /* ---- pan the empty board / draw / erase ---- */
+  const onSurfaceDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool === "select") {
+      if (e.target !== e.currentTarget) return;
+      const v = viewRef.current!;
+      panRef.current = { x: e.clientX, y: e.clientY, sl: v.scrollLeft, st: v.scrollTop };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+  };
+  const onSurfaceMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (!pan) return;
+    const v = viewRef.current!;
+    v.scrollLeft = pan.sl - (e.clientX - pan.x);
+    v.scrollTop = pan.st - (e.clientY - pan.y);
+  };
+  const onSurfaceUp = () => {
+    panRef.current = null;
+  };
+
+  const onInkDown = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (tool === "pen") {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const p = toBoard(e.clientX, e.clientY);
+      setDrawing([[p.x, p.y]]);
+    } else if (tool === "eraser") {
+      erasingRef.current = true;
+      const id = (e.target as Element).getAttribute("data-stroke");
+      if (id) eraseStroke(id);
+    }
+  };
+  const onInkMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (tool === "pen" && drawing) {
+      const p = toBoard(e.clientX, e.clientY);
+      const last = drawing[drawing.length - 1];
+      if (Math.abs(p.x - last[0]) + Math.abs(p.y - last[1]) >= 2) setDrawing([...drawing, [p.x, p.y]]);
+    }
+  };
+  const onInkUp = () => {
+    erasingRef.current = false;
+    if (tool === "pen" && drawing) {
+      const stroke: BoardStroke = { id: `stroke-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, color: penColor, size: penSize, points: drawing, authorId: me.id };
+      onChange((b) => ({ ...b, strokes: [...b.strokes, stroke] }));
+      setDrawing(null);
+    }
+  };
+
+  const toolBtn = (t: BoardTool, icon: keyof typeof ICON_PATHS, label: string) => (
+    <button type="button" className={`${styles.boardTool} ${tool === t ? styles.boardToolOn : ""}`} onClick={() => setTool(t)} title={label} aria-pressed={tool === t}>
+      <Icon name={icon} size={17} />
+      <span>{label}</span>
+    </button>
+  );
+
+  const empty = board.notes.length === 0 && board.strokes.length === 0;
+
+  return (
+    <div className={styles.boardOverlay} role="dialog" aria-label={`${group.name} planning board`}>
+      <div className={styles.boardBar}>
+        <div className={styles.boardTitle}>
+          <span className={styles.boardTitleIcon}>
+            <Icon name="note" size={18} />
+          </span>
+          <div>
+            <b>{group.name} board</b>
+            <span>Everyone in the group can add and move things here</span>
+          </div>
+        </div>
+
+        <div className={styles.boardTools}>
+          <div className={styles.boardToolGroup}>
+            {toolBtn("select", "pointer", "Move")}
+            {toolBtn("pen", "pen", "Pen")}
+            {toolBtn("eraser", "eraser", "Eraser")}
+          </div>
+
+          {tool === "pen" && (
+            <div className={styles.boardToolGroup}>
+              {PEN_COLORS.map((c) => (
+                <button key={c} type="button" className={`${styles.penSwatch} ${penColor === c ? styles.penSwatchOn : ""}`} style={{ background: c }} onClick={() => setPenColor(c)} title="Pen color" aria-pressed={penColor === c} />
+              ))}
+              <span className={styles.boardDivider} />
+              {PEN_SIZES.map((sz) => (
+                <button key={sz} type="button" className={`${styles.penSize} ${penSize === sz ? styles.penSwatchOn : ""}`} onClick={() => setPenSize(sz)} title={`Pen size ${sz}`} aria-pressed={penSize === sz}>
+                  <span style={{ width: sz + 2, height: sz + 2, background: penColor }} />
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className={styles.boardToolGroup}>
+            <span className={styles.boardTrayLabel}>Drag a note</span>
+            {NOTE_COLORS.map((c) => (
+              <button key={c.value} type="button" className={styles.notePad} style={{ background: c.value }} onPointerDown={(e) => startTrayDrag(e, c.value)} title={`${c.name} note: drag onto the board, or click to add`} aria-label={`Add ${c.name.toLowerCase()} note`} />
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.boardActions}>
+          <button type="button" className={styles.btnGhost2} onClick={() => myLastStroke && eraseStroke(myLastStroke.id)} disabled={!myLastStroke} title="Undo your last drawing">
+            <Icon name="undo" size={15} /> Undo
+          </button>
+          <button type="button" className={styles.boardClose} onClick={onClose} title="Close board (Esc)" aria-label="Close board">
+            <Icon name="x" size={20} />
+          </button>
+        </div>
+      </div>
+
+      <div ref={viewRef} className={`${styles.boardView} ${tool === "select" ? styles.boardViewPan : ""}`}>
+        <div
+          ref={surfaceRef}
+          className={styles.boardSurface}
+          style={{ width: BOARD_W, height: BOARD_H }}
+          onPointerDown={onSurfaceDown}
+          onPointerMove={onSurfaceMove}
+          onPointerUp={onSurfaceUp}
+          onPointerCancel={onSurfaceUp}
+        >
+          {[...board.notes]
+            .sort((a, b) => a.z - b.z)
+            .map((n) => {
+              const pos = drag?.id === n.id ? drag : n;
+              return (
+                <div key={n.id} className={`${styles.stickyNote} ${drag?.id === n.id ? styles.stickyNoteDrag : ""}`} style={{ left: pos.x, top: pos.y, width: NOTE_W, background: n.color }}>
+                  <div className={styles.stickyHead} onPointerDown={(e) => startNoteDrag(e, n)}>
+                    <span className={styles.stickyDot} style={{ background: n.authorColor }} />
+                    <span className={styles.stickyAuthor}>{n.authorName}</span>
+                    <button type="button" className={styles.stickyDel} onClick={() => deleteNote(n.id)} title="Delete note" aria-label="Delete note">
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </div>
+                  <textarea
+                    className={styles.stickyText}
+                    value={n.text}
+                    autoFocus={focusId === n.id}
+                    onFocus={() => focusId === n.id && setFocusId(null)}
+                    onChange={(e) => updateNote(n.id, { text: e.target.value })}
+                    placeholder="Type your idea…"
+                    aria-label="Note text"
+                  />
+                </div>
+              );
+            })}
+
+          <svg
+            className={`${styles.boardInk} ${tool !== "select" ? styles.boardInkActive : ""} ${tool === "eraser" ? styles.boardInkErase : ""}`}
+            width={BOARD_W}
+            height={BOARD_H}
+            onPointerDown={onInkDown}
+            onPointerMove={onInkMove}
+            onPointerUp={onInkUp}
+            onPointerCancel={onInkUp}
+          >
+            {board.strokes.map((s) => (
+              <g key={s.id}>
+                <path d={strokeToPath(s.points)} stroke={s.color} strokeWidth={s.size} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                {tool === "eraser" && (
+                  <path
+                    d={strokeToPath(s.points)}
+                    data-stroke={s.id}
+                    className={styles.inkHit}
+                    strokeWidth={Math.max(16, s.size + 10)}
+                    fill="none"
+                    strokeLinecap="round"
+                    onPointerEnter={() => erasingRef.current && eraseStroke(s.id)}
+                  />
+                )}
+              </g>
+            ))}
+            {drawing && <path d={strokeToPath(drawing)} stroke={penColor} strokeWidth={penSize} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
+          </svg>
+        </div>
+
+        {empty && (
+          <div className={styles.boardEmpty}>
+            <Icon name="note" size={28} />
+            <b>Start planning together</b>
+            <span>Drag a sticky note from the top bar onto the board, or pick the pen to sketch ideas.</span>
+          </div>
+        )}
+      </div>
+
+      {ghost && <div className={styles.noteGhost} style={{ left: ghost.cx - NOTE_W / 2, top: ghost.cy - 20, width: NOTE_W, background: ghost.color }} />}
     </div>
   );
 }
@@ -1969,7 +2280,12 @@ function PostDetail({
   const fileRef = useRef<HTMLInputElement>(null);
   const [slidesDragOver, setSlidesDragOver] = useState(false);
   const [dragOverSlideId, setDragOverSlideId] = useState<string | null>(null);
-  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [step, setStep] = useState<PostStep>(post.posted ? 2 : 0);
+  const [maxStep, setMaxStep] = useState<PostStep>(post.posted ? 2 : 0);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [mode, setMode] = useState<"now" | "later">(post.scheduledFor ? "later" : "now");
+  const [scheduleAt, setScheduleAt] = useState(() => toDatetimeLocal(post.scheduledFor ?? Date.now() + 60 * 60000));
+  const topRef = useRef<HTMLDivElement>(null);
   const voterKey = me.id;
   const members = group.members;
   const threshold = Math.max(1, Math.ceil(members.length / 2));
@@ -2012,9 +2328,39 @@ function PostDetail({
     return ups >= threshold;
   }).length;
 
+  const accounts = group.instagramAccounts;
+  const selectedAccount = accounts.find((a) => a.id === post.draft.instagramAccountId) ?? accounts[0];
+  const handle = selectedAccount?.handle ?? primaryHandle(group);
+
+  const canGoTo = (i: PostStep) => i === 0 || (slides.length > 0 && i <= maxStep + 1);
+  const goTo = (i: PostStep) => {
+    if (!canGoTo(i)) return;
+    setStep(i);
+    setMaxStep((m) => (i > m ? i : m));
+    topRef.current?.closest("main")?.scrollTo({ top: 0 });
+  };
+  const stepDone = (i: PostStep) => (i === 2 ? post.posted : i < maxStep && (i !== 0 || slides.length > 0));
+
+  const shareBlocked = !isAdmin
+    ? "Only admins can post"
+    : !canPost
+      ? "Link an Instagram account first"
+      : slides.length === 0
+        ? "Add at least one photo first"
+        : mode === "later" && !Number.isFinite(new Date(scheduleAt).getTime())
+          ? "Pick a date and time"
+          : "";
+
+  const share = () => {
+    setConfirmOpen(false);
+    if (shareBlocked) return;
+    if (mode === "later") onSchedule(new Date(scheduleAt).getTime());
+    else onSetPosted(true);
+  };
+
   return (
     <>
-      <div className={`${styles.home} ${styles.homeFull}`}>
+      <div ref={topRef} className={`${styles.home} ${styles.homeFull} ${styles.flowPage}`}>
         <div className={styles.projHead}>
           <div>
             <h1>{post.name}</h1>
@@ -2029,13 +2375,9 @@ function PostDetail({
               <Icon name="clock" size={11} /> {scheduledLabel(post.scheduledFor)}
             </span>
           ) : null}
-          {post.posted ? (
+          {post.posted && (
             <button className={styles.btnGhost2} onClick={() => onSetPosted(false)}>
               Move back to drafts
-            </button>
-          ) : (
-            <button className={styles.btnSm} onClick={() => setFinalizeOpen(true)}>
-              <Icon name="send" size={14} /> Preview &amp; finalize
             </button>
           )}
         </div>
@@ -2045,6 +2387,10 @@ function PostDetail({
           </button>
         )}
 
+        <StepBar step={step} isDone={stepDone} canGoTo={canGoTo} onGo={goTo} />
+
+        {step === 0 && (
+          <>
         <div className={styles.postLayout}>
           <aside className={styles.photosPanel}>
             <div className={styles.panelHead}>
@@ -2182,50 +2528,508 @@ function PostDetail({
           </section>
         </div>
 
-        <div className={styles.sectHead}>
-          <h3>Credits</h3>
-        </div>
-        {credits.length === 0 ? (
-          <p className={styles.hint}>Add photos to see who shot them.</p>
-        ) : (
-          <ul className={styles.creditsList}>
-            {credits.map((name) => (
-              <li key={name}>Shot by {name}</li>
-            ))}
-          </ul>
+          </>
         )}
+
+        {step === 1 && <DetailsStep group={group} post={post} slides={slides} onUpdateDraft={onUpdateDraft} onOpenInstagram={onOpenInstagram} />}
+
+        {step === 2 && (
+          <ReviewStep
+            group={group}
+            post={post}
+            slides={slides}
+            handle={handle}
+            credits={credits}
+            inCount={inCount}
+            threshold={threshold}
+            mode={mode}
+            setMode={setMode}
+            scheduleAt={scheduleAt}
+            setScheduleAt={setScheduleAt}
+            onEdit={goTo}
+          />
+        )}
+
+        <div className={styles.flowFooter}>
+          {step > 0 ? (
+            <button type="button" className={styles.btnGhost2} onClick={() => goTo((step - 1) as PostStep)}>
+              <Icon name="l" size={14} /> {POST_STEPS[step - 1].label}
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className={styles.flowFooterRight}>
+            {step === 0 && slides.length === 0 && <span className={styles.footerHint}>Add at least one photo to the carousel</span>}
+            {step === 2 && !post.posted && shareBlocked && <span className={styles.footerHint}>{shareBlocked}</span>}
+            {step < 2 ? (
+              <button type="button" className={styles.btnSm} disabled={!canGoTo((step + 1) as PostStep)} onClick={() => goTo((step + 1) as PostStep)}>
+                Next: {POST_STEPS[step + 1].label} <Icon name="r" size={14} />
+              </button>
+            ) : post.posted ? (
+              <span className={`${styles.pill} ${styles.pillOk}`}>
+                <Icon name="check" size={11} /> Shared to Instagram
+              </span>
+            ) : (
+              <button type="button" className={styles.btnSm} disabled={!!shareBlocked} onClick={() => setConfirmOpen(true)}>
+                <Icon name="send" size={14} /> {mode === "later" ? "Schedule post" : "Share"}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      {finalizeOpen && (
-        <FinalizePostModal
-          group={group}
-          post={post}
-          slides={slides}
-          isAdmin={isAdmin}
-          canPost={canPost}
-          onUpdateDraft={onUpdateDraft}
-          onSetPosted={onSetPosted}
-          onSchedule={onSchedule}
-          onOpenInstagram={onOpenInstagram}
-          onClose={() => setFinalizeOpen(false)}
-        />
+      {confirmOpen && (
+        <div className={styles.overlay} onClick={() => setConfirmOpen(false)}>
+          <div className={styles.modal} role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" onClick={(e) => e.stopPropagation()}>
+            <h2 id="confirmTitle">{mode === "later" ? `Schedule for ${handle}?` : `Post to ${handle}?`}</h2>
+            <p className={styles.confirmText}>
+              {mode === "later"
+                ? `${post.name} (${slides.length} ${slides.length === 1 ? "photo" : "photos"}) will go live on Instagram ${new Date(scheduleAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.`
+                : `This shares ${post.name} (${slides.length} ${slides.length === 1 ? "photo" : "photos"}) on Instagram right away. Everyone following the account will see it.`}
+            </p>
+            <div className={`${styles.modalActions} ${styles.confirmActions}`}>
+              <button type="button" className={styles.btnGhost} autoFocus onClick={() => setConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className={styles.btnPrimary} onClick={share}>
+                {mode === "later" ? "Yes, schedule it" : "Yes, post it"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
 }
 
-function InstagramPreviewCard({ group, post, slides }: { group: Group; post: PostCard; slides: Photo[] }) {
+type PostStep = 0 | 1 | 2;
+
+const POST_STEPS: { label: string; sub: string }[] = [
+  { label: "Photos", sub: "Upload and vote" },
+  { label: "Details", sub: "Caption, audio, tags" },
+  { label: "Review", sub: "Check and share" },
+];
+
+function StepBar({
+  step,
+  isDone,
+  canGoTo,
+  onGo,
+}: {
+  step: PostStep;
+  isDone: (i: PostStep) => boolean;
+  canGoTo: (i: PostStep) => boolean;
+  onGo: (i: PostStep) => void;
+}) {
+  return (
+    <ol className={styles.stepBar} aria-label="Post steps">
+      {POST_STEPS.map((s, idx) => {
+        const i = idx as PostStep;
+        const done = isDone(i);
+        const on = step === i;
+        return (
+          <li key={s.label} className={styles.stepCell}>
+            <button
+              type="button"
+              className={`${styles.stepItem} ${on ? styles.stepItemOn : ""} ${done && !on ? styles.stepItemDone : ""}`}
+              disabled={!canGoTo(i)}
+              aria-current={on ? "step" : undefined}
+              onClick={() => onGo(i)}
+            >
+              <span className={styles.stepNum}>{done && !on ? <Icon name="check" size={14} /> : idx + 1}</span>
+              <span className={styles.stepText}>
+                <b>{s.label}</b>
+                <small>{done && !on ? "Done" : s.sub}</small>
+              </span>
+            </button>
+            {idx < POST_STEPS.length - 1 && <span className={`${styles.stepLine} ${done ? styles.stepLineDone : ""}`} />}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+const SUGGESTED_AUDIO = ["Golden Hour · JVKE", "Good Days · SZA", "Sunday Best · Surfaces", "Island in the Sun · Weezer", "Electric Feel · MGMT"];
+
+function DetailsStep({
+  group,
+  post,
+  slides,
+  onUpdateDraft,
+  onOpenInstagram,
+}: {
+  group: Group;
+  post: PostCard;
+  slides: Photo[];
+  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
+  onOpenInstagram: () => void;
+}) {
+  const [audioQuery, setAudioQuery] = useState("");
+  const [personInput, setPersonInput] = useState("");
+  const [productInput, setProductInput] = useState("");
+  const d = post.draft;
+  const set = (patch: Partial<Draft>) => onUpdateDraft((draft) => ({ ...draft, ...patch }));
+
+  const tagged = d.taggedPeople ?? [];
+  const products = d.taggedProducts ?? [];
+  const accounts = group.instagramAccounts;
+  const account = accounts.find((a) => a.id === d.instagramAccountId) ?? accounts[0];
+  const locationIdeas = [group.name, "Lawrence, Kansas", "University of Kansas", "Massachusetts Street"].filter((l) => l !== d.location);
+  const audioMatches = audioQuery.trim()
+    ? SUGGESTED_AUDIO.filter((a) => a.toLowerCase().includes(audioQuery.trim().toLowerCase()))
+    : SUGGESTED_AUDIO;
+
+  const addPerson = (raw: string) => {
+    const h = normalizeHandle(raw);
+    if (!h || tagged.includes(h)) return;
+    set({ taggedPeople: [...tagged, h] });
+  };
+  const removePerson = (h: string) => set({ taggedPeople: tagged.filter((x) => x !== h) });
+  const addProduct = (raw: string) => {
+    const p = raw.trim();
+    if (!p || products.includes(p)) return;
+    set({ taggedProducts: [...products, p] });
+  };
+  const teamHandles = new Set(group.members.map((m) => normalizeHandle(m.username || m.name)));
+  const otherTagged = tagged.filter((h) => !teamHandles.has(h));
+
+  return (
+    <div className={styles.detailsGrid}>
+      {/* ---- Caption & audio ---- */}
+      <section className={styles.dCard}>
+        <div className={styles.dCardHead}>
+          <h3>Caption &amp; audio</h3>
+          <span className={styles.hint}>
+            {slides.length} {slides.length === 1 ? "photo" : "photos"}
+          </span>
+        </div>
+        <div className={styles.thumbStrip}>
+          {slides.map((p) => (
+            <span key={p.id} className={styles.thumbStripItem}>
+              <PhotoThumb photo={p} />
+            </span>
+          ))}
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="dcaption">Caption</label>
+          <textarea
+            id="dcaption"
+            className={`${styles.captionBox} ${styles.captionTall}`}
+            value={d.caption}
+            onChange={(e) => set({ caption: e.target.value })}
+            placeholder="Write a caption. Tag people and brands with @."
+          />
+          <span className={styles.fieldCount}>{d.caption.length} / 2,200</span>
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="daudio">
+            <Icon name="music" size={13} /> Audio <span className={styles.fieldNote}>(optional)</span>
+          </label>
+          {d.audio ? (
+            <div className={styles.picked}>
+              <Icon name="music" size={14} />
+              <span>{d.audio}</span>
+              <button type="button" className={styles.iconClose} onClick={() => set({ audio: undefined })} title="Remove audio">
+                <Icon name="x" size={13} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <input id="daudio" className={styles.input} value={audioQuery} onChange={(e) => setAudioQuery(e.target.value)} placeholder="Search music" />
+              <div className={styles.chipRow}>
+                {audioMatches.map((a) => (
+                  <button key={a} type="button" className={styles.pchip} onClick={() => set({ audio: a })}>
+                    {a}
+                  </button>
+                ))}
+                {audioMatches.length === 0 && <span className={styles.hint}>No songs match “{audioQuery}”.</span>}
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
+      {/* ---- Tags & location ---- */}
+      <section className={styles.dCard}>
+        <div className={styles.dCardHead}>
+          <h3>Tags &amp; location</h3>
+        </div>
+
+        <div className={styles.field}>
+          <label>
+            <Icon name="user" size={13} /> Tag people
+          </label>
+          <div className={styles.chipRow}>
+            {group.members.map((m) => {
+              const h = normalizeHandle(m.username || m.name);
+              const on = tagged.includes(h);
+              return (
+                <button key={m.id} type="button" className={`${styles.pchip} ${on ? styles.pchipOn : ""}`} aria-pressed={on} onClick={() => (on ? removePerson(h) : addPerson(h))}>
+                  {on && <Icon name="check" size={12} />} {m.name}
+                </button>
+              );
+            })}
+            {otherTagged.map((h) => (
+              <button key={h} type="button" className={`${styles.pchip} ${styles.pchipOn}`} onClick={() => removePerson(h)} title="Remove tag">
+                {h} <Icon name="x" size={11} />
+              </button>
+            ))}
+          </div>
+          <form
+            className={styles.inlineAdd}
+            onSubmit={(e) => {
+              e.preventDefault();
+              addPerson(personInput);
+              setPersonInput("");
+            }}
+          >
+            <input className={styles.input} value={personInput} onChange={(e) => setPersonInput(e.target.value)} placeholder="Tag someone else, e.g. @username" aria-label="Tag someone else" />
+            <button type="submit" className={styles.btnGhost2} disabled={!personInput.trim()}>
+              Tag
+            </button>
+          </form>
+        </div>
+
+        <div className={styles.field}>
+          <label>
+            <Icon name="bag" size={13} /> Tag products <span className={styles.fieldNote}>(optional)</span>
+          </label>
+          <form
+            className={styles.inlineAdd}
+            onSubmit={(e) => {
+              e.preventDefault();
+              addProduct(productInput);
+              setProductInput("");
+            }}
+          >
+            <input className={styles.input} value={productInput} onChange={(e) => setProductInput(e.target.value)} placeholder="Product name" aria-label="Product name" />
+            <button type="submit" className={styles.btnGhost2} disabled={!productInput.trim()}>
+              Add
+            </button>
+          </form>
+          {products.length > 0 && (
+            <div className={styles.chipRow}>
+              {products.map((p) => (
+                <button key={p} type="button" className={`${styles.pchip} ${styles.pchipOn}`} onClick={() => set({ taggedProducts: products.filter((x) => x !== p) })} title="Remove">
+                  {p} <Icon name="x" size={11} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="dlocation">
+            <Icon name="pin" size={13} /> Location <span className={styles.fieldNote}>(optional)</span>
+          </label>
+          <input id="dlocation" className={styles.input} value={d.location ?? ""} onChange={(e) => set({ location: e.target.value })} placeholder="Add location" />
+          {!d.location && (
+            <div className={styles.chipRow}>
+              {locationIdeas.map((l) => (
+                <button key={l} type="button" className={styles.pchip} onClick={() => set({ location: l })}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
+          <span className={styles.fieldHelp}>Anyone who sees the post can see this location.</span>
+        </div>
+      </section>
+
+      {/* ---- Sharing settings ---- */}
+      <section className={styles.dCard}>
+        <div className={styles.dCardHead}>
+          <h3>Sharing</h3>
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="daccount">
+            <Icon name="instagram" size={13} /> Post to
+          </label>
+          {accounts.length === 0 ? (
+            <button type="button" className={styles.linkIgHint} onClick={onOpenInstagram}>
+              <Icon name="instagram" size={12} /> Link an Instagram account to post
+            </button>
+          ) : (
+            <select id="daccount" className={styles.input} value={account?.id ?? ""} onChange={(e) => set({ instagramAccountId: e.target.value })}>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.handle}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className={styles.field}>
+          <label>
+            <Icon name="eye" size={13} /> Audience
+          </label>
+          <div className={`${styles.roleToggle} ${styles.toggleFull}`}>
+            <button type="button" className={`${styles.roleBtn} ${d.audience !== "close" ? styles.roleBtnOn : ""}`} onClick={() => set({ audience: "everyone" })}>
+              Everyone
+            </button>
+            <button type="button" className={`${styles.roleBtn} ${d.audience === "close" ? styles.roleBtnOn : ""}`} onClick={() => set({ audience: "close" })}>
+              Close friends
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.field}>
+          <label>
+            <Icon name="share" size={13} /> Also share on
+          </label>
+          <label className={styles.switchRow}>
+            <span>Facebook</span>
+            <input type="checkbox" className={styles.switch} checked={!!d.shareFacebook} onChange={(e) => set({ shareFacebook: e.target.checked })} />
+          </label>
+          <label className={styles.switchRow}>
+            <span>Threads</span>
+            <input type="checkbox" className={styles.switch} checked={!!d.shareThreads} onChange={(e) => set({ shareThreads: e.target.checked })} />
+          </label>
+        </div>
+
+        <div className={styles.field}>
+          <label>
+            <Icon name="sliders" size={13} /> More options
+          </label>
+          <label className={styles.switchRow}>
+            <span>Hide like count</span>
+            <input type="checkbox" className={styles.switch} checked={!!d.hideLikeCount} onChange={(e) => set({ hideLikeCount: e.target.checked })} />
+          </label>
+          <label className={styles.switchRow}>
+            <span>Turn off commenting</span>
+            <input type="checkbox" className={styles.switch} checked={!!d.commentsOff} onChange={(e) => set({ commentsOff: e.target.checked })} />
+          </label>
+          <label className={styles.switchRow}>
+            <span>
+              Add AI label
+              <small>Required for realistic photos made with AI</small>
+            </span>
+            <input type="checkbox" className={styles.switch} checked={!!d.aiLabel} onChange={(e) => set({ aiLabel: e.target.checked })} />
+          </label>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReviewStep({
+  group,
+  post,
+  slides,
+  handle,
+  credits,
+  inCount,
+  threshold,
+  mode,
+  setMode,
+  scheduleAt,
+  setScheduleAt,
+  onEdit,
+}: {
+  group: Group;
+  post: PostCard;
+  slides: Photo[];
+  handle: string;
+  credits: string[];
+  inCount: number;
+  threshold: number;
+  mode: "now" | "later";
+  setMode: (m: "now" | "later") => void;
+  scheduleAt: string;
+  setScheduleAt: (v: string) => void;
+  onEdit: (step: PostStep) => void;
+}) {
+  const d = post.draft;
+  const tagged = d.taggedPeople ?? [];
+  const products = d.taggedProducts ?? [];
+  const shareOn = [d.shareFacebook && "Facebook", d.shareThreads && "Threads"].filter(Boolean).join(", ");
+  const extras = [d.hideLikeCount && "Like count hidden", d.commentsOff && "Comments off", d.aiLabel && "AI label"].filter(Boolean).join(" · ");
+
+  const Item = ({ label, value, empty, to }: { label: string; value?: string; empty: string; to: PostStep }) => (
+    <div className={styles.sumRow}>
+      <span className={styles.sumLabel}>{label}</span>
+      <span className={value ? styles.sumValue : `${styles.sumValue} ${styles.sumEmpty}`}>{value || empty}</span>
+      {!post.posted && (
+        <button type="button" className={styles.linkBtn} onClick={() => onEdit(to)}>
+          Edit
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <div className={styles.reviewLayout}>
+      <div className={styles.reviewPhone}>
+        <InstagramPreviewCard group={group} post={post} slides={slides} handle={handle} />
+      </div>
+      <div className={styles.reviewSummary}>
+        <h3>Everything look right?</h3>
+        <p className={styles.hint}>This is exactly what will go out. Fix anything here before you share.</p>
+        <div className={styles.sumList}>
+          <Item
+            label="Photos"
+            value={`${slides.length} ${slides.length === 1 ? "photo" : "photos"} · ${inCount} with ${threshold}+ thumbs up`}
+            empty="No photos yet"
+            to={0}
+          />
+          <Item label="Caption" value={d.caption.trim() ? d.caption : undefined} empty="No caption" to={1} />
+          <Item label="Audio" value={d.audio} empty="No audio" to={1} />
+          <Item label="Tagged" value={tagged.join(", ")} empty="No one tagged" to={1} />
+          <Item label="Products" value={products.join(", ")} empty="None" to={1} />
+          <Item label="Location" value={d.location} empty="No location" to={1} />
+          <Item label="Post to" value={handle} empty="Not linked" to={1} />
+          <Item label="Audience" value={d.audience === "close" ? "Close friends" : "Everyone"} empty="" to={1} />
+          <Item label="Also share on" value={shareOn} empty="Off" to={1} />
+          <Item label="Settings" value={extras} empty="Defaults" to={1} />
+          <div className={styles.sumRow}>
+            <span className={styles.sumLabel}>Credits</span>
+            <span className={styles.sumValue}>{credits.length ? credits.map((c) => `Shot by ${c}`).join(" · ") : "—"}</span>
+          </div>
+        </div>
+
+        {!post.posted && (
+          <div className={styles.field}>
+            <label>When</label>
+            <div className={styles.roleToggle}>
+              <button type="button" className={`${styles.roleBtn} ${mode === "now" ? styles.roleBtnOn : ""}`} onClick={() => setMode("now")}>
+                Post now
+              </button>
+              <button type="button" className={`${styles.roleBtn} ${mode === "later" ? styles.roleBtnOn : ""}`} onClick={() => setMode("later")}>
+                Schedule
+              </button>
+            </div>
+            {mode === "later" && <input type="datetime-local" className={styles.input} value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} />}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InstagramPreviewCard({ group, post, slides, handle: handleIn }: { group: Group; post: PostCard; slides: Photo[]; handle?: string }) {
   const [pvIndex, setPvIndex] = useState(0);
   const activeIndex = Math.min(pvIndex, Math.max(0, slides.length - 1));
-  const handle = primaryHandle(group).replace(/^@/, "");
+  const handle = (handleIn ?? primaryHandle(group)).replace(/^@/, "");
+  const d = post.draft;
+  const sub = [d.location, d.audio && `♪ ${d.audio}`].filter(Boolean) as string[];
 
   return (
     <div className={styles.pvCard}>
       <div className={styles.pvHead}>
-        <span className={styles.groupIcon} style={{ "--c": group.color, width: "26px", height: "26px", borderRadius: "50%", fontSize: "10px" } as CSSProperties}>
+        <span className={styles.groupIcon} style={{ "--c": group.color, width: "30px", height: "30px", borderRadius: "50%", fontSize: "11px" } as CSSProperties}>
           {initials(group.name)}
         </span>
-        <b>{handle}</b>
+        <span className={styles.pvWho}>
+          <b>{handle}</b>
+          {sub.map((s) => (
+            <small key={s}>{s}</small>
+          ))}
+        </span>
       </div>
       <div className={styles.pvImage}>
         {slides.length === 0 ? (
@@ -2233,8 +3037,16 @@ function InstagramPreviewCard({ group, post, slides }: { group: Group; post: Pos
         ) : (
           <>
             <PhotoThumb photo={slides[activeIndex]} />
+            {(d.taggedPeople?.length ?? 0) > 0 && (
+              <span className={styles.pvTag} title={d.taggedPeople!.join(", ")}>
+                <Icon name="user" size={12} />
+              </span>
+            )}
             {slides.length > 1 && (
               <>
+                <span className={styles.pvCount}>
+                  {activeIndex + 1}/{slides.length}
+                </span>
                 <button className={`${styles.pvNav} ${styles.pvNavL}`} disabled={activeIndex === 0} onClick={() => setPvIndex((i) => Math.max(0, i - 1))}>
                   <Icon name="l" size={14} />
                 </button>
@@ -2256,177 +3068,18 @@ function InstagramPreviewCard({ group, post, slides }: { group: Group; post: Pos
         )}
       </div>
       <div className={styles.pvIcons}>
-        <Icon name="heart" size={20} />
-        <Icon name="comment" size={20} />
-        <Icon name="send" size={20} />
+        <Icon name="heart" size={22} />
+        {!d.commentsOff && <Icon name="comment" size={22} />}
+        <Icon name="send" size={22} />
       </div>
+      {!d.hideLikeCount && <div className={styles.pvLikes}>Be the first to like this</div>}
       <div className={styles.pvCaption}>
-        <b>{handle}</b> {post.draft.caption || <span className={styles.hint}>No caption yet</span>}
+        <b>{handle}</b> {d.caption || <span className={styles.hint}>No caption yet</span>}
       </div>
-      {post.draft.location && <div className={styles.pvLocation}>{post.draft.location}</div>}
+      {d.aiLabel && <div className={styles.pvLocation}>AI info</div>}
     </div>
   );
 }
-
-function FinalizePostModal({
-  group,
-  post,
-  slides,
-  isAdmin,
-  canPost,
-  onUpdateDraft,
-  onSetPosted,
-  onSchedule,
-  onOpenInstagram,
-  onClose,
-}: {
-  group: Group;
-  post: PostCard;
-  slides: Photo[];
-  isAdmin: boolean;
-  canPost: boolean;
-  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
-  onSetPosted: (posted: boolean) => void;
-  onSchedule: (scheduledFor: number) => void;
-  onOpenInstagram: () => void;
-  onClose: () => void;
-}) {
-  const accounts = group.instagramAccounts;
-  const [mode, setMode] = useState<"now" | "later">(post.scheduledFor ? "later" : "now");
-  const [scheduleAt, setScheduleAt] = useState(() => toDatetimeLocal(post.scheduledFor ?? Date.now() + 60 * 60000));
-  const selectedAccountId = post.draft.instagramAccountId ?? accounts[0]?.id ?? "";
-
-  const disabled = !isAdmin || !canPost || slides.length === 0;
-  const disabledReason = !isAdmin
-    ? "Only admins can post"
-    : !canPost
-      ? "Link an Instagram account first"
-      : slides.length === 0
-        ? "Add at least one photo first"
-        : undefined;
-
-  const submit = () => {
-    if (disabled) return;
-    if (mode === "later") {
-      const ts = new Date(scheduleAt).getTime();
-      if (!Number.isFinite(ts)) return;
-      onSchedule(ts);
-    } else {
-      onSetPosted(true);
-    }
-    onClose();
-  };
-
-  return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={`${styles.modal} ${styles.finalizeModal}`} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.finalizeHead}>
-          <h2>Preview &amp; finalize</h2>
-          <button className={styles.iconClose} onClick={onClose} title="Close">
-            <Icon name="x" size={16} />
-          </button>
-        </div>
-        <div className={styles.finalizeBody}>
-          <InstagramPreviewCard group={group} post={post} slides={slides} />
-          <div className={styles.finalizeOptions}>
-            <div className={styles.field}>
-              <label htmlFor="fcaption">Caption</label>
-              <textarea
-                id="fcaption"
-                className={styles.captionBox}
-                value={post.draft.caption}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, caption: e.target.value }))}
-                placeholder="Write a caption. Tag people and brands with @."
-              />
-            </div>
-
-            {accounts.length > 0 ? (
-              <div className={styles.field}>
-                <label htmlFor="faccount">Post to</label>
-                <select
-                  id="faccount"
-                  className={styles.input}
-                  value={selectedAccountId}
-                  onChange={(e) => onUpdateDraft((draft) => ({ ...draft, instagramAccountId: e.target.value }))}
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.handle}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <button type="button" className={styles.linkIgHint} onClick={onOpenInstagram}>
-                <Icon name="instagram" size={12} /> Link an Instagram account to post
-              </button>
-            )}
-
-            <div className={styles.field}>
-              <label htmlFor="flocation">
-                Location <span className={styles.fieldNote}>(optional)</span>
-              </label>
-              <input
-                id="flocation"
-                className={styles.input}
-                value={post.draft.location ?? ""}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, location: e.target.value }))}
-                placeholder="Add location"
-              />
-            </div>
-
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={!!post.draft.hideLikeCount}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, hideLikeCount: e.target.checked }))}
-              />
-              Hide like count on this post
-            </label>
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={!!post.draft.commentsOff}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, commentsOff: e.target.checked }))}
-              />
-              Turn off commenting
-            </label>
-
-            <div className={styles.field}>
-              <label>When</label>
-              <div className={styles.roleToggle}>
-                <button type="button" className={`${styles.roleBtn} ${mode === "now" ? styles.roleBtnOn : ""}`} onClick={() => setMode("now")}>
-                  Post now
-                </button>
-                <button type="button" className={`${styles.roleBtn} ${mode === "later" ? styles.roleBtnOn : ""}`} onClick={() => setMode("later")}>
-                  Schedule
-                </button>
-              </div>
-              {mode === "later" && (
-                <input
-                  type="datetime-local"
-                  className={styles.input}
-                  value={scheduleAt}
-                  onChange={(e) => setScheduleAt(e.target.value)}
-                />
-              )}
-            </div>
-
-            <div className={styles.modalActions}>
-              <button type="button" className={styles.btnGhost} onClick={onClose}>
-                Cancel
-              </button>
-              <button type="button" className={styles.btnPrimary} disabled={disabled} title={disabledReason} onClick={submit}>
-                {mode === "later" ? "Schedule post" : "Post now"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function MediaPage({
   group,
   onAddMedia,
