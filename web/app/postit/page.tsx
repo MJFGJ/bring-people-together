@@ -919,8 +919,14 @@ export default function PostitPage() {
 
       {creatingGroup && <CreateGroupModal allGroups={groups} onCreate={handleCreateGroup} onCancel={() => setCreatingGroup(false)} />}
       {creatingPost && <CreatePostModal onCreate={handleCreatePost} onCancel={() => setCreatingPost(false)} />}
-      {invitingTeam && activeGroup && (
-        <InviteModal group={activeGroup} allGroups={groups} onSave={(members) => handleSaveMembers(activeGroup.id, members)} onCancel={() => setInvitingTeam(false)} />
+      {invitingTeam && activeGroup && user && (
+        <InviteModal
+          group={activeGroup}
+          allGroups={groups}
+          isAdmin={isMasterAdmin(user) || activeGroup.members.find((m) => m.id === user.id)?.role === "admin"}
+          onSave={(members) => handleSaveMembers(activeGroup.id, members)}
+          onCancel={() => setInvitingTeam(false)}
+        />
       )}
       {linkingInstagram && activeGroup && (
         <InstagramModal group={activeGroup} onSave={(accounts) => handleSaveInstagram(activeGroup.id, accounts)} onCancel={() => setLinkingInstagram(false)} />
@@ -1128,10 +1134,12 @@ function TeamEditor({
   drafts,
   setDrafts,
   allGroups,
+  canRemoveMembers = true,
 }: {
   drafts: DraftMember[];
   setDrafts: (fn: (d: DraftMember[]) => DraftMember[]) => void;
   allGroups: Group[];
+  canRemoveMembers?: boolean;
 }) {
   const addRow = () => setDrafts((d) => [...d, { key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, identifier: "", role: "member" }]);
   const removeRow = (key: string) => setDrafts((d) => d.filter((r) => r.key !== key));
@@ -1167,9 +1175,11 @@ function TeamEditor({
               Admin
             </button>
           </div>
-          <button type="button" className={styles.iconClose} onClick={() => removeRow(d.key)} title="Remove">
-            <Icon name="x" size={14} />
-          </button>
+          {(canRemoveMembers || !d.existing) && (
+            <button type="button" className={styles.iconClose} onClick={() => removeRow(d.key)} title="Remove">
+              <Icon name="x" size={14} />
+            </button>
+          )}
         </div>
       ))}
       <button type="button" className={styles.btnGhost} onClick={addRow}>
@@ -1300,11 +1310,13 @@ function CreateGroupModal({
 function InviteModal({
   group,
   allGroups,
+  isAdmin,
   onSave,
   onCancel,
 }: {
   group: Group;
   allGroups: Group[];
+  isAdmin: boolean;
   onSave: (members: Member[]) => void;
   onCancel: () => void;
 }) {
@@ -1325,7 +1337,7 @@ function InviteModal({
         <p className={styles.sub}>
           Who&rsquo;s in <b>{group.name}</b>. Admins can post; team members can request a post.
         </p>
-        <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} />
+        <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} canRemoveMembers={isAdmin} />
         <div className={styles.modalActions}>
           <button type="button" className={styles.btnGhost} onClick={onCancel}>
             Cancel
