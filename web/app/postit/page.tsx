@@ -2014,7 +2014,7 @@ function PostDetail({
 
   return (
     <>
-      <div className={styles.home}>
+      <div className={`${styles.home} ${styles.homeFull}`}>
         <div className={styles.projHead}>
           <div>
             <h1>{post.name}</h1>
