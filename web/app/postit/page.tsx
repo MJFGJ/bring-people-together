@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { usePartySocket } from "partysocket/react";
 import styles from "./postit.module.css";
 import type { PostitServerMessage } from "@/lib/postitRealtimeTypes";
@@ -179,6 +179,27 @@ interface MediaFolder {
   name: string;
 }
 
+interface ScreenComment {
+  id: string;
+  screenKey: string;
+  anchor: "main" | "fixed";
+  x: number;
+  y: number;
+  text: string;
+  authorId: string;
+  authorName: string;
+  authorColor: string;
+  at: number;
+}
+
+interface CommentDraft {
+  screenKey: string;
+  anchor: "main" | "fixed";
+  x: number;
+  y: number;
+  text: string;
+}
+
 interface Group {
   id: string;
   name: string;
@@ -189,6 +210,7 @@ interface Group {
   folders: MediaFolder[];
   posts: PostCard[];
   chat: ChatMessage[];
+  comments?: ScreenComment[];
   activity: ActivityItem[];
 }
 
@@ -374,6 +396,7 @@ const ICON_PATHS = {
   comment: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
   send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  quote: '<path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   l: '<path d="m15 18-6-6 6-6"/>',
   r: '<path d="m9 18 6-6-6-6"/>',
@@ -811,6 +834,10 @@ export default function PostitPage() {
     handleUpdateDraft(postId, (draft) => (draft.slideIds.includes(photoId) ? draft : { ...draft, slideIds: [...draft.slideIds, photoId] }));
   };
 
+  const handleUpdateComments = (groupId: string, fn: (comments: ScreenComment[]) => ScreenComment[]) => {
+    updateGroup(groupId, (g) => ({ ...g, comments: fn(g.comments ?? []) }));
+  };
+
   const handleSendChat = (groupId: string, text: string) => {
     if (!user || !text.trim()) return;
     const msg: ChatMessage = { id: `msg-${Date.now()}`, at: Date.now(), authorId: user.id, authorName: user.name, color: user.color, fg: "#fff", text: text.trim() };
@@ -914,6 +941,7 @@ export default function PostitPage() {
           onDropPhotoOnPost={handleDropPhotoOnPost}
           onDeletePost={(postId) => handleDeletePost(activeGroup.id, postId)}
           onSendChat={(text) => handleSendChat(activeGroup.id, text)}
+          onUpdateComments={(fn) => handleUpdateComments(activeGroup.id, fn)}
         />
       )}
 
@@ -1453,6 +1481,7 @@ function AppShell({
   onDropPhotoOnPost,
   onDeletePost,
   onSendChat,
+  onUpdateComments,
 }: {
   user: CurrentUser;
   group: Group;
@@ -1482,6 +1511,7 @@ function AppShell({
   onDropPhotoOnPost: (postId: string, photoId: string) => void;
   onDeletePost: (postId: string) => void;
   onSendChat: (text: string) => void;
+  onUpdateComments: (fn: (comments: ScreenComment[]) => ScreenComment[]) => void;
 }) {
   const members = group.members;
   const first = user.name.trim().split(/\s+/)[0] || user.name;
@@ -1491,6 +1521,55 @@ function AppShell({
 
   const [cursors, setCursors] = useState<Record<string, { x: number; y: number; color: string; name: string }>>({});
   const lastCursorSent = useRef(0);
+
+  const mainRef = useRef<HTMLElement>(null);
+  const [commenting, setCommenting] = useState(false);
+  const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const screenKey = screen === "post" && activePostId ? `post:${activePostId}` : screen;
+  const screenComments = (group.comments ?? []).filter((c) => c.screenKey === screenKey);
+  const draftHere = commentDraft?.screenKey === screenKey ? commentDraft : null;
+
+  useEffect(() => {
+    if (!commenting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCommenting(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [commenting]);
+
+  const placeComment = (e: ReactMouseEvent) => {
+    setCommenting(false);
+    const m = mainRef.current;
+    const r = m?.getBoundingClientRect();
+    if (m && r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+      setCommentDraft({ screenKey, anchor: "main", x: Math.round(e.clientX - r.left + m.scrollLeft), y: Math.round(e.clientY - r.top + m.scrollTop), text: "" });
+    } else {
+      setCommentDraft({ screenKey, anchor: "fixed", x: Math.round(e.clientX), y: Math.round(e.clientY), text: "" });
+    }
+  };
+  const saveComment = () => {
+    if (!commentDraft || !commentDraft.text.trim()) return;
+    const c: ScreenComment = {
+      ...commentDraft,
+      text: commentDraft.text.trim(),
+      id: `cmt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      authorId: user.id,
+      authorName: user.name,
+      authorColor: user.color,
+      at: Date.now(),
+    };
+    onUpdateComments((list) => [...list, c]);
+    setCommentDraft(null);
+  };
+  const commentLayerProps = {
+    meId: user.id,
+    onDelete: (id: string) => onUpdateComments((list) => list.filter((c) => c.id !== id)),
+    onDraftText: (text: string) => setCommentDraft((d) => (d ? { ...d, text } : d)),
+    onSave: saveComment,
+    onCancel: () => setCommentDraft(null),
+  };
+  const mainWidth = mainRef.current?.clientWidth ?? 1000;
 
   const cursorSocket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:8788",
@@ -1633,7 +1712,14 @@ function AppShell({
           </button>
         </nav>
 
-        <main className={styles.main}>
+        <main ref={mainRef} className={styles.main}>
+          <CommentLayer
+            comments={screenComments.filter((c) => c.anchor === "main")}
+            draft={draftHere?.anchor === "main" ? draftHere : null}
+            fixed={false}
+            flipX={mainWidth - 300}
+            {...commentLayerProps}
+          />
           {screen === "posts" && (
             <PostsGrid
               group={group}
@@ -1689,6 +1775,36 @@ function AppShell({
 
       <ChatBubble key={group.id} group={group} meId={user.id} onSend={onSendChat} />
 
+      <CommentLayer
+        comments={screenComments.filter((c) => c.anchor === "fixed")}
+        draft={draftHere?.anchor === "fixed" ? draftHere : null}
+        fixed
+        flipX={(typeof window !== "undefined" ? window.innerWidth : 1400) - 300}
+        {...commentLayerProps}
+      />
+
+      {commenting && (
+        <div className={styles.cPlacing} onClick={placeComment}>
+          <div className={styles.cPlacingHint}>
+            <Icon name="quote" size={14} /> Click anywhere to leave a comment · Esc to cancel
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className={`${styles.commentFab} ${commenting ? styles.commentFabOn : ""}`}
+        onClick={() => {
+          setCommentDraft(null);
+          setCommenting((v) => !v);
+        }}
+        title={commenting ? "Cancel comment" : "Add a comment"}
+        aria-pressed={commenting}
+      >
+        <Icon name={commenting ? "x" : "quote"} size={20} />
+        {screenComments.length > 0 && !commenting && <span className={styles.chatBadge}>{screenComments.length}</span>}
+      </button>
+
       {liveCursors && (
         <div className={styles.cursorLayer}>
           {Object.entries(cursors).map(([id, c]) => (
@@ -1701,6 +1817,89 @@ function AppShell({
               </span>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommentLayer({
+  comments,
+  draft,
+  fixed,
+  flipX,
+  meId,
+  onDelete,
+  onDraftText,
+  onSave,
+  onCancel,
+}: {
+  comments: ScreenComment[];
+  draft: CommentDraft | null;
+  fixed: boolean;
+  flipX: number;
+  meId: string;
+  onDelete: (id: string) => void;
+  onDraftText: (text: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  if (comments.length === 0 && !draft) return null;
+  return (
+    <div className={fixed ? styles.cLayerFixed : styles.cLayer}>
+      {comments.map((c) => (
+        <div key={c.id} className={`${styles.cPin} ${c.x > flipX ? styles.cPinFlip : ""}`} style={{ left: c.x, top: c.y }}>
+          <button type="button" className={styles.cDot} style={{ background: c.authorColor }} aria-label={`Comment from ${c.authorName}`}>
+            <Icon name="quote" size={13} />
+          </button>
+          <div className={styles.cCard}>
+            <div className={styles.cCardHead}>
+              <span className={styles.cAuthorDot} style={{ background: c.authorColor }} />
+              <b>{c.authorId === meId ? "You" : c.authorName}</b>
+              <span className={styles.hint}>{timeAgo(c.at)}</span>
+              <button type="button" className={styles.cIconBtn} onClick={() => onDelete(c.id)} title="Delete comment" aria-label="Delete comment">
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+            <p className={styles.cText}>{c.text}</p>
+          </div>
+        </div>
+      ))}
+      {draft && (
+        <div className={`${styles.cPin} ${styles.cPinOpen} ${draft.x > flipX ? styles.cPinFlip : ""}`} style={{ left: draft.x, top: draft.y }}>
+          <span className={styles.cDot}>
+            <Icon name="quote" size={13} />
+          </span>
+          <form
+            className={styles.cCard}
+            onSubmit={(e) => {
+              e.preventDefault();
+              onSave();
+            }}
+          >
+            <textarea
+              className={styles.cInput}
+              value={draft.text}
+              autoFocus
+              onChange={(e) => onDraftText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  onSave();
+                } else if (e.key === "Escape") onCancel();
+              }}
+              placeholder="Add a comment…"
+              aria-label="Comment text"
+            />
+            <div className={styles.cDraftActions}>
+              <button type="button" className={styles.cIconBtn} onClick={onCancel} title="Cancel" aria-label="Cancel comment">
+                <Icon name="x" size={15} />
+              </button>
+              <button type="submit" className={styles.cSave} disabled={!draft.text.trim()} title="Save comment" aria-label="Save comment">
+                <Icon name="check" size={15} />
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
