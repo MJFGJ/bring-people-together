@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { usePartySocket } from "partysocket/react";
 import styles from "./postit.module.css";
 import type { PostitServerMessage } from "@/lib/postitRealtimeTypes";
@@ -77,6 +77,13 @@ interface Draft {
   hideLikeCount?: boolean;
   commentsOff?: boolean;
   instagramAccountId?: string | null;
+  audio?: string;
+  taggedPeople?: string[];
+  taggedProducts?: string[];
+  aiLabel?: boolean;
+  audience?: "everyone" | "close";
+  shareFacebook?: boolean;
+  shareThreads?: boolean;
 }
 
 interface PostCard {
@@ -200,6 +207,29 @@ interface CommentDraft {
   text: string;
 }
 
+interface GroupInvite {
+  id: string;
+  identifier: string; // email or @username of the person invited
+  role: Role;
+  invitedById: string;
+  invitedByName: string;
+  at: number;
+}
+
+function inviteKey(s: string): string {
+  return s.trim().toLowerCase().replace(/^@/, "");
+}
+
+function inviteMatchesUser(invite: GroupInvite, user: { email: string; username: string }): boolean {
+  const k = inviteKey(invite.identifier);
+  return !!k && (k === inviteKey(user.email) || k === inviteKey(user.username));
+}
+
+function isInMembers(identifier: string, members: Member[]): boolean {
+  const k = inviteKey(identifier);
+  return members.some((m) => (m.email && inviteKey(m.email) === k) || (m.username && inviteKey(m.username) === k));
+}
+
 interface Group {
   id: string;
   name: string;
@@ -211,7 +241,15 @@ interface Group {
   posts: PostCard[];
   chat: ChatMessage[];
   comments?: ScreenComment[];
+  // Groups created after invites were added are private: only members and
+  // people with a pending invite can see them. Older/demo groups stay open.
+  inviteOnly?: boolean;
+  invites?: GroupInvite[];
   activity: ActivityItem[];
+}
+
+function canSeeGroup(group: Group, user: CurrentUser): boolean {
+  return !group.inviteOnly || isMasterAdmin(user) || group.members.some((m) => m.id === user.id);
 }
 
 function primaryHandle(group: Group): string {
@@ -384,6 +422,7 @@ function isMasterAdmin(user: CurrentUser): boolean {
 
 const ICON_PATHS = {
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
   chev: '<path d="m6 9 6 6 6-6"/>',
   back: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
@@ -404,6 +443,14 @@ const ICON_PATHS = {
   down: '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
   instagram: '<rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>',
   cursor: '<path d="M4 4l7.07 17 2.51-7.39L21 11.07z"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  bag: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+  pin: '<path d="M20 10c0 4.99-5.54 10.19-7.4 11.8a1 1 0 0 1-1.2 0C9.54 20.19 4 14.99 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  sparkle: '<path d="M12 3l1.9 5.6 5.6 1.9-5.6 1.9L12 18l-1.9-5.6-5.6-1.9 5.6-1.9Z"/><path d="M19 17v4"/><path d="M17 19h4"/>',
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
+  share: '<path d="M7 17 17 7"/><path d="M7 7h10v10"/>',
+  dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 } as const;
 
 function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: number }) {
@@ -579,7 +626,7 @@ export default function PostitPage() {
   const ensureMembership = (groupId: string) => {
     if (!user) return;
     const group = groupsRef.current.find((g) => g.id === groupId);
-    if (!group || group.members.some((m) => m.id === user.id)) return;
+    if (!group || group.inviteOnly || group.members.some((m) => m.id === user.id)) return;
     const me: Member = { id: user.id, name: user.name, email: user.email, username: user.username, role: "member", color: user.color, fg: "#fff" };
     commitGroups(groupsRef.current.map((g) => (g.id === groupId ? { ...g, members: [...g.members, me] } : g)));
   };
@@ -598,7 +645,17 @@ export default function PostitPage() {
     const id = `${slugify(name)}-${Date.now().toString(36)}`;
     const color = GROUP_COLORS[groups.length % GROUP_COLORS.length];
     const me: Member = { id: user.id, name: user.name, email: user.email, username: user.username, role: "admin", color: user.color, fg: "#fff" };
-    const members = [me, ...invitees];
+    const members = [me];
+    const invites: GroupInvite[] = invitees
+      .filter((m) => (m.email || m.username) && !isInMembers(m.email || m.username, members))
+      .map((m) => ({
+        id: `inv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        identifier: m.email || m.username,
+        role: m.role,
+        invitedById: user.id,
+        invitedByName: user.name,
+        at: Date.now(),
+      }));
     const makeActivityId = () => `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const activity: ActivityItem[] = [];
     for (const m of invitees) {
@@ -625,7 +682,7 @@ export default function PostitPage() {
         icon: "instagram",
       });
     }
-    const group: Group = { id, name, color, members, instagramAccounts, media: [], folders: [], posts: [], chat: [], activity: activity.reverse() };
+    const group: Group = { id, name, color, members, instagramAccounts, media: [], folders: [], posts: [], chat: [], inviteOnly: true, invites, activity: activity.reverse() };
     commitGroups([...groupsRef.current, group]);
     setActiveGroupId(id);
     setScreen("posts");
@@ -633,7 +690,7 @@ export default function PostitPage() {
     setStage("app");
     setCreatingGroup(false);
     pushToast(
-      `Created <em>${name}</em>${invitees.length ? ` with ${invitees.length} teammate${invitees.length === 1 ? "" : "s"}` : ""}.${
+      `Created <em>${name}</em>${invites.length ? ` and sent ${invites.length} invite${invites.length === 1 ? "" : "s"}` : ""}.${
         instagramAccounts.length ? "" : " Link an Instagram account before you post."
       }`
     );
@@ -652,9 +709,11 @@ export default function PostitPage() {
     pushToast(`Deleted <em>${group.name}</em>.`);
   };
 
-  const handleSaveMembers = (groupId: string, nextMembers: Member[]) => {
+  const handleSaveMembers = (groupId: string, nextMembers: Member[], nextInvites: GroupInvite[]) => {
     const group = groups.find((g) => g.id === groupId);
     if (!group) return;
+    const prevInviteIds = new Set((group.invites ?? []).map((i) => i.id));
+    const sent = nextInvites.filter((i) => !prevInviteIds.has(i.id));
     let members = nextMembers;
     if (members.length && !members.some((m) => m.role === "admin")) {
       members = members.map((m, i) => (i === 0 ? { ...m, role: "admin" } : m));
@@ -663,7 +722,10 @@ export default function PostitPage() {
     const nextIds = new Set(members.map((m) => m.id));
     const added = members.filter((m) => !prevIds.has(m.id));
     const removed = group.members.filter((m) => !nextIds.has(m.id));
-    updateGroup(groupId, (g) => ({ ...g, members }));
+    updateGroup(groupId, (g) => ({ ...g, members, invites: nextInvites }));
+    for (const inv of sent) {
+      pushActivity(groupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: `invited ${inv.identifier} as ${inv.role === "admin" ? "an admin" : "a team member"} to`, target: group.name, icon: "plus" });
+    }
     for (const m of added) {
       pushActivity(groupId, { actorName: user?.name ?? "You", color: user?.color ?? "#888", fg: "#fff", verb: `invited ${m.name} as ${m.role === "admin" ? "an admin" : "a team member"} to`, target: group.name, icon: "plus" });
     }
@@ -684,7 +746,27 @@ export default function PostitPage() {
       }
     }
     setInvitingTeam(false);
-    pushToast(added.length ? `Invited ${added.map((m) => m.name).join(", ")}.` : "Updated the team.");
+    pushToast(sent.length ? `Sent ${sent.length === 1 ? "an invite" : `${sent.length} invites`} to ${sent.map((i) => i.identifier).join(", ")}.` : "Updated the team.");
+  };
+
+  const handleRespondInvite = (groupId: string, inviteId: string, accept: boolean) => {
+    if (!user) return;
+    const group = groupsRef.current.find((g) => g.id === groupId);
+    const invite = group?.invites?.find((i) => i.id === inviteId);
+    if (!group || !invite) return;
+    const me: Member = { id: user.id, name: user.name, email: user.email, username: user.username, role: invite.role, color: user.color, fg: "#fff" };
+    updateGroup(groupId, (g) => ({
+      ...g,
+      invites: (g.invites ?? []).filter((i) => i.id !== inviteId),
+      members: accept && !g.members.some((m) => m.id === user.id) ? [...g.members, me] : g.members,
+    }));
+    pushActivity(groupId, { actorName: user.name, color: user.color, fg: "#fff", verb: accept ? "joined" : "declined the invite to", target: group.name, icon: accept ? "check" : "x" });
+    if (accept) {
+      handleSelectGroup(groupId);
+      pushToast(`You joined <em>${group.name}</em>.`);
+    } else {
+      pushToast(`Declined the invite to <em>${group.name}</em>.`);
+    }
   };
 
   const handleSaveInstagram = (groupId: string, accounts: InstagramAccount[]) => {
@@ -888,7 +970,11 @@ export default function PostitPage() {
       {stage === "groups" && user && (
         <GroupPicker
           user={user}
-          groups={groups}
+          groups={groups.filter((g) => canSeeGroup(g, user))}
+          invitations={groups.flatMap((g) =>
+            g.members.some((m) => m.id === user.id) ? [] : (g.invites ?? []).filter((i) => inviteMatchesUser(i, user)).map((invite) => ({ group: g, invite }))
+          )}
+          onRespondInvite={handleRespondInvite}
           onSelect={handleSelectGroup}
           onCreate={() => setCreatingGroup(true)}
           onSignOut={handleSignOut}
@@ -951,8 +1037,9 @@ export default function PostitPage() {
         <InviteModal
           group={activeGroup}
           allGroups={groups}
+          me={user}
           isAdmin={isMasterAdmin(user) || activeGroup.members.find((m) => m.id === user.id)?.role === "admin"}
-          onSave={(members) => handleSaveMembers(activeGroup.id, members)}
+          onSave={(members, invites) => handleSaveMembers(activeGroup.id, members, invites)}
           onCancel={() => setInvitingTeam(false)}
         />
       )}
@@ -1061,6 +1148,8 @@ function ConnectInstagramScreen({ onFinish }: { onFinish: (instagram?: string) =
 function GroupPicker({
   user,
   groups,
+  invitations,
+  onRespondInvite,
   onSelect,
   onCreate,
   onSignOut,
@@ -1068,6 +1157,8 @@ function GroupPicker({
 }: {
   user: CurrentUser;
   groups: Group[];
+  invitations: { group: Group; invite: GroupInvite }[];
+  onRespondInvite: (groupId: string, inviteId: string, accept: boolean) => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onSignOut: () => void;
@@ -1090,6 +1181,34 @@ function GroupPicker({
         </p>
       </div>
       <div className={styles.loginCard}>
+        {invitations.length > 0 && (
+          <div className={styles.inviteList}>
+            <h3>
+              <Icon name="mail" size={15} /> {invitations.length === 1 ? "You have an invite" : `You have ${invitations.length} invites`}
+            </h3>
+            {invitations.map(({ group: g, invite }) => (
+              <div key={invite.id} className={styles.inviteCard}>
+                <span className={styles.groupIcon} style={{ "--c": g.color } as CSSProperties}>
+                  {initials(g.name)}
+                </span>
+                <span className={styles.groupInfo}>
+                  <b>{g.name}</b>
+                  <span className={styles.groupStats}>
+                    {invite.invitedByName} invited you as {invite.role === "admin" ? "an admin" : "a team member"} · {timeAgo(invite.at)}
+                  </span>
+                </span>
+                <div className={styles.inviteActions}>
+                  <button type="button" className={styles.btnGhost2} onClick={() => onRespondInvite(g.id, invite.id, false)}>
+                    Decline
+                  </button>
+                  <button type="button" className={styles.btnSm} onClick={() => onRespondInvite(g.id, invite.id, true)}>
+                    Join group
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         <h2>Which group do you want to work in, {first}?</h2>
         <p className={styles.sub}>
           {groups.length} {groups.length === 1 ? "group" : "groups"}
@@ -1163,11 +1282,15 @@ function TeamEditor({
   setDrafts,
   allGroups,
   canRemoveMembers = true,
+  memberIds,
+  addLabel = "Add teammate",
 }: {
   drafts: DraftMember[];
   setDrafts: (fn: (d: DraftMember[]) => DraftMember[]) => void;
   allGroups: Group[];
   canRemoveMembers?: boolean;
+  memberIds?: Set<string>;
+  addLabel?: string;
 }) {
   const addRow = () => setDrafts((d) => [...d, { key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, identifier: "", role: "member" }]);
   const removeRow = (key: string) => setDrafts((d) => d.filter((r) => r.key !== key));
@@ -1188,7 +1311,8 @@ function TeamEditor({
   return (
     <div className={styles.memberEditor}>
       {drafts.map((d) => (
-        <div key={d.key} className={styles.memberRow}>
+        <div key={d.key} className={`${styles.memberRow} ${memberIds ? styles.memberRowTagged : ""}`}>
+          {memberIds && (d.existing && memberIds.has(d.existing.id) ? <Avatar name={d.existing.name} color={d.existing.color} fg={d.existing.fg} size="sm" /> : <span className={`${styles.pill} ${styles.pillWarn}`}>Invite</span>)}
           <input
             className={styles.input}
             placeholder="Email or @username"
@@ -1211,7 +1335,7 @@ function TeamEditor({
         </div>
       ))}
       <button type="button" className={styles.btnGhost} onClick={addRow}>
-        <Icon name="plus" size={14} /> Add teammate
+        <Icon name="plus" size={14} /> {addLabel}
       </button>
       {suggestions.length > 0 && (
         <div className={styles.chipRow}>
@@ -1314,8 +1438,8 @@ function CreateGroupModal({
         </div>
         <div className={styles.field}>
           <label>Invite teammates (optional)</label>
-          <p className={styles.fieldNote}>Admins have final say on posting. Team members can request a post for an admin to approve.</p>
-          <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} />
+          <p className={styles.fieldNote}>You&rsquo;ll be the admin. Everyone you add gets an invite and joins once they accept. Admins have final say on posting; team members can request a post.</p>
+          <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} addLabel="Invite someone" />
         </div>
         <div className={styles.field}>
           <label>Link Instagram accounts</label>
@@ -1338,41 +1462,109 @@ function CreateGroupModal({
 function InviteModal({
   group,
   allGroups,
+  me,
   isAdmin,
   onSave,
   onCancel,
 }: {
   group: Group;
   allGroups: Group[];
+  me: CurrentUser;
   isAdmin: boolean;
-  onSave: (members: Member[]) => void;
+  onSave: (members: Member[], invites: GroupInvite[]) => void;
   onCancel: () => void;
 }) {
+  const memberIds = new Set(group.members.map((m) => m.id));
   const [drafts, setDrafts] = useState<DraftMember[]>(() =>
     group.members.map((m) => ({ key: m.id, identifier: m.email || m.username, role: m.role, existing: m }))
   );
+  const [pending, setPending] = useState<GroupInvite[]>(group.invites ?? []);
+
+  const isMemberDraft = (d: DraftMember) => !!d.existing && memberIds.has(d.existing.id);
+  const newInviteDrafts = drafts.filter((d) => !isMemberDraft(d) && isValidIdentifier(d.existing ? d.existing.email || d.existing.username : d.identifier));
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const contacts = allGroups.flatMap((g) => g.members);
-    onSave(draftsToMembers(drafts, contacts));
+    if (!isAdmin) return onCancel();
+    const members = drafts.filter(isMemberDraft).map((d) => ({ ...d.existing!, role: d.role }));
+    const invites = [...pending];
+    for (const d of newInviteDrafts) {
+      const identifier = (d.existing ? d.existing.email || d.existing.username : d.identifier).trim();
+      if (isInMembers(identifier, members) || invites.some((i) => inviteKey(i.identifier) === inviteKey(identifier))) continue;
+      invites.push({
+        id: `inv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        identifier,
+        role: d.role,
+        invitedById: me.id,
+        invitedByName: me.name,
+        at: Date.now(),
+      });
+    }
+    onSave(members, invites);
   };
 
   return (
     <div className={styles.overlay} onClick={onCancel}>
       <form className={`${styles.modal} ${styles.modalWide}`} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h2>Team &amp; roles</h2>
+        <h2>Team &amp; invites</h2>
         <p className={styles.sub}>
-          Who&rsquo;s in <b>{group.name}</b>. Admins can post; team members can request a post.
+          Who&rsquo;s in <b>{group.name}</b>. Admins can post and invite people; team members can request a post.
         </p>
-        <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} canRemoveMembers={isAdmin} />
+
+        {isAdmin ? (
+          <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} canRemoveMembers memberIds={memberIds} addLabel="Invite someone" />
+        ) : (
+          <>
+            <div className={styles.memberEditor}>
+              {group.members.map((m) => (
+                <div key={m.id} className={styles.teamRow}>
+                  <Avatar name={m.name} color={m.color} fg={m.fg} size="sm" />
+                  <span className={styles.teamName}>
+                    {m.name}
+                    {m.id === me.id && <span className={styles.hint}> (you)</span>}
+                  </span>
+                  <span className={`${styles.pill} ${m.role === "admin" ? styles.pillOk : ""}`}>{m.role === "admin" ? "Admin" : "Member"}</span>
+                </div>
+              ))}
+            </div>
+            <p className={styles.fieldNote}>Only a group admin can invite people or change roles.</p>
+          </>
+        )}
+
+        {pending.length > 0 && (
+          <div className={styles.pendingList}>
+            <h3>Waiting to join ({pending.length})</h3>
+            {pending.map((inv) => (
+              <div key={inv.id} className={styles.teamRow}>
+                <span className={styles.pendingIcon}>
+                  <Icon name="mail" size={14} />
+                </span>
+                <span className={styles.teamName}>
+                  {inv.identifier}
+                  <span className={styles.hint}>
+                    {" "}
+                    · {inv.role === "admin" ? "admin" : "member"} · invited by {inv.invitedById === me.id ? "you" : inv.invitedByName} {timeAgo(inv.at)}
+                  </span>
+                </span>
+                {isAdmin && (
+                  <button type="button" className={styles.iconClose} onClick={() => setPending((p) => p.filter((x) => x.id !== inv.id))} title="Cancel invite" aria-label={`Cancel invite to ${inv.identifier}`}>
+                    <Icon name="x" size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className={styles.modalActions}>
           <button type="button" className={styles.btnGhost} onClick={onCancel}>
-            Cancel
+            {isAdmin ? "Cancel" : "Close"}
           </button>
-          <button type="submit" className={styles.btnPrimary}>
-            Save team
-          </button>
+          {isAdmin && (
+            <button type="submit" className={styles.btnPrimary}>
+              {newInviteDrafts.length > 0 ? `Save & send ${newInviteDrafts.length === 1 ? "invite" : `${newInviteDrafts.length} invites`}` : "Save team"}
+            </button>
+          )}
         </div>
       </form>
     </div>
@@ -1662,6 +1854,9 @@ function AppShell({
             <Icon name="plus" size={13} />
           </button>
         </div>
+        <span className={`${styles.roleTag} ${isAdmin ? styles.roleTagAdmin : ""}`} title={isAdmin ? `You're an admin of ${group.name}` : `You're a teammate in ${group.name}`}>
+          {isAdmin ? "Admin" : "Teammate"}
+        </span>
         <div className={styles.meWrap}>
           <button className={styles.mebtn} aria-expanded={menuOpen} onClick={onToggleMenu}>
             <Avatar name={user.name} color={user.color} />
@@ -1757,6 +1952,7 @@ function AppShell({
           )}
           {screen === "post" && activePost && (
             <PostDetail
+              key={activePost.id}
               group={group}
               post={activePost}
               me={user}
@@ -2168,7 +2364,12 @@ function PostDetail({
   const fileRef = useRef<HTMLInputElement>(null);
   const [slidesDragOver, setSlidesDragOver] = useState(false);
   const [dragOverSlideId, setDragOverSlideId] = useState<string | null>(null);
-  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [step, setStep] = useState<PostStep>(post.posted ? 2 : 0);
+  const [maxStep, setMaxStep] = useState<PostStep>(post.posted ? 2 : 0);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [mode, setMode] = useState<"now" | "later">(post.scheduledFor ? "later" : "now");
+  const [scheduleAt, setScheduleAt] = useState(() => toDatetimeLocal(post.scheduledFor ?? Date.now() + 60 * 60000));
+  const topRef = useRef<HTMLDivElement>(null);
   const voterKey = me.id;
   const members = group.members;
   const threshold = Math.max(1, Math.ceil(members.length / 2));
@@ -2211,9 +2412,39 @@ function PostDetail({
     return ups >= threshold;
   }).length;
 
+  const accounts = group.instagramAccounts;
+  const selectedAccount = accounts.find((a) => a.id === post.draft.instagramAccountId) ?? accounts[0];
+  const handle = selectedAccount?.handle ?? primaryHandle(group);
+
+  const canGoTo = (i: PostStep) => i === 0 || (slides.length > 0 && i <= maxStep + 1);
+  const goTo = (i: PostStep) => {
+    if (!canGoTo(i)) return;
+    setStep(i);
+    setMaxStep((m) => (i > m ? i : m));
+    topRef.current?.closest("main")?.scrollTo({ top: 0 });
+  };
+  const stepDone = (i: PostStep) => (i === 2 ? post.posted : i < maxStep && (i !== 0 || slides.length > 0));
+
+  const shareBlocked = !isAdmin
+    ? "Only admins can post"
+    : !canPost
+      ? "Link an Instagram account first"
+      : slides.length === 0
+        ? "Add at least one photo first"
+        : mode === "later" && !Number.isFinite(new Date(scheduleAt).getTime())
+          ? "Pick a date and time"
+          : "";
+
+  const share = () => {
+    setConfirmOpen(false);
+    if (shareBlocked) return;
+    if (mode === "later") onSchedule(new Date(scheduleAt).getTime());
+    else onSetPosted(true);
+  };
+
   return (
     <>
-      <div className={`${styles.home} ${styles.homeFull}`}>
+      <div ref={topRef} className={`${styles.home} ${styles.homeFull} ${styles.flowPage}`}>
         <div className={styles.projHead}>
           <div>
             <h1>{post.name}</h1>
@@ -2228,13 +2459,9 @@ function PostDetail({
               <Icon name="clock" size={11} /> {scheduledLabel(post.scheduledFor)}
             </span>
           ) : null}
-          {post.posted ? (
+          {post.posted && (
             <button className={styles.btnGhost2} onClick={() => onSetPosted(false)}>
               Move back to drafts
-            </button>
-          ) : (
-            <button className={styles.btnSm} onClick={() => setFinalizeOpen(true)}>
-              <Icon name="send" size={14} /> Preview &amp; finalize
             </button>
           )}
         </div>
@@ -2244,6 +2471,10 @@ function PostDetail({
           </button>
         )}
 
+        <StepBar step={step} isDone={stepDone} canGoTo={canGoTo} onGo={goTo} />
+
+        {step === 0 && (
+          <>
         <div className={styles.postLayout}>
           <aside className={styles.photosPanel}>
             <div className={styles.panelHead}>
@@ -2381,50 +2612,713 @@ function PostDetail({
           </section>
         </div>
 
-        <div className={styles.sectHead}>
-          <h3>Credits</h3>
-        </div>
-        {credits.length === 0 ? (
-          <p className={styles.hint}>Add photos to see who shot them.</p>
-        ) : (
-          <ul className={styles.creditsList}>
-            {credits.map((name) => (
-              <li key={name}>Shot by {name}</li>
-            ))}
-          </ul>
+          </>
         )}
+
+        {step === 1 && <DetailsStep group={group} post={post} slides={slides} onUpdateDraft={onUpdateDraft} onOpenInstagram={onOpenInstagram} />}
+
+        {step === 2 && !isAdmin && <AdminReviewNotice group={group} post={post} slides={slides} handle={handle} />}
+
+        {step === 2 && isAdmin && (
+          <ReviewStep
+            group={group}
+            post={post}
+            slides={slides}
+            handle={handle}
+            credits={credits}
+            inCount={inCount}
+            threshold={threshold}
+            mode={mode}
+            setMode={setMode}
+            scheduleAt={scheduleAt}
+            setScheduleAt={setScheduleAt}
+            onEdit={goTo}
+            onUpdateDraft={onUpdateDraft}
+            onOpenInstagram={onOpenInstagram}
+          />
+        )}
+
+        <div className={styles.flowFooter}>
+          {step > 0 ? (
+            <button type="button" className={styles.btnGhost2} onClick={() => goTo((step - 1) as PostStep)}>
+              <Icon name="l" size={14} /> {POST_STEPS[step - 1].label}
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className={styles.flowFooterRight}>
+            {step === 0 && slides.length === 0 && <span className={styles.footerHint}>Add at least one photo to the carousel</span>}
+            {step === 2 && isAdmin && !post.posted && shareBlocked && <span className={styles.footerHint}>{shareBlocked}</span>}
+            {step < 2 ? (
+              <button type="button" className={styles.btnSm} disabled={!canGoTo((step + 1) as PostStep)} onClick={() => goTo((step + 1) as PostStep)}>
+                Next: {POST_STEPS[step + 1].label} <Icon name="r" size={14} />
+              </button>
+            ) : post.posted ? (
+              <span className={`${styles.pill} ${styles.pillOk}`}>
+                <Icon name="check" size={11} /> Shared to Instagram
+              </span>
+            ) : !isAdmin ? (
+              <span className={`${styles.pill} ${styles.pillWarn}`}>
+                <Icon name="clock" size={11} /> {post.scheduledFor ? "Scheduled by an admin" : "With an admin for review"}
+              </span>
+            ) : (
+              <button type="button" className={styles.btnSm} disabled={!!shareBlocked} onClick={() => setConfirmOpen(true)}>
+                <Icon name="send" size={14} /> {mode === "later" ? "Schedule post" : "Share"}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      {finalizeOpen && (
-        <FinalizePostModal
-          group={group}
-          post={post}
-          slides={slides}
-          isAdmin={isAdmin}
-          canPost={canPost}
-          onUpdateDraft={onUpdateDraft}
-          onSetPosted={onSetPosted}
-          onSchedule={onSchedule}
-          onOpenInstagram={onOpenInstagram}
-          onClose={() => setFinalizeOpen(false)}
-        />
+      {confirmOpen && (
+        <div className={styles.overlay} onClick={() => setConfirmOpen(false)}>
+          <div className={styles.modal} role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" onClick={(e) => e.stopPropagation()}>
+            <h2 id="confirmTitle">{mode === "later" ? `Schedule for ${handle}?` : `Post to ${handle}?`}</h2>
+            <p className={styles.confirmText}>
+              {mode === "later"
+                ? `${post.name} (${slides.length} ${slides.length === 1 ? "photo" : "photos"}) will go live on Instagram ${new Date(scheduleAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.`
+                : `This shares ${post.name} (${slides.length} ${slides.length === 1 ? "photo" : "photos"}) on Instagram right away. Everyone following the account will see it.`}
+            </p>
+            <div className={`${styles.modalActions} ${styles.confirmActions}`}>
+              <button type="button" className={styles.btnGhost} autoFocus onClick={() => setConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className={styles.btnPrimary} onClick={share}>
+                {mode === "later" ? "Yes, schedule it" : "Yes, post it"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
 }
 
-function InstagramPreviewCard({ group, post, slides }: { group: Group; post: PostCard; slides: Photo[] }) {
+type PostStep = 0 | 1 | 2;
+
+// What teammates see on step 3. Only admins do the final review and post.
+function AdminReviewNotice({ group, post, slides, handle }: { group: Group; post: PostCard; slides: Photo[]; handle: string }) {
+  const admins = group.members.filter((m) => m.role === "admin");
+  const names = admins.map((m) => m.name.split(/\s+/)[0]);
+  const who = names.length === 0 ? "An admin" : names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
+  const cover = slides[0] ?? null;
+
+  let icon: keyof typeof ICON_PATHS = "eye";
+  let title = "This post is being reviewed by an admin";
+  let body = `${who} will look everything over one more time and post it to ${handle}. You can still make changes in Photos and Details until then.`;
+  if (post.posted) {
+    icon = "check";
+    title = "This post is live";
+    body = `An admin shared it to ${handle}${post.postedAt ? ` on ${new Date(post.postedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}.`;
+  } else if (post.scheduledFor) {
+    icon = "clock";
+    title = "An admin scheduled this post";
+    body = `It goes live on ${handle} on ${new Date(post.scheduledFor).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}. You can still make changes in Photos and Details until then.`;
+  }
+
+  return (
+    <div className={styles.reviewNotice}>
+      <div className={styles.reviewNoticeCard}>
+        <span className={styles.reviewNoticeCover}>
+          <PhotoThumb photo={cover} />
+          <span className={`${styles.reviewNoticeBadge} ${post.posted ? styles.reviewNoticeBadgeOk : ""}`}>
+            <Icon name={icon} size={16} />
+          </span>
+        </span>
+        <h2>{title}</h2>
+        <p>{body}</p>
+        {admins.length > 0 && (
+          <div className={styles.reviewNoticeAdmins}>
+            <span className={styles.hint}>{admins.length === 1 ? "Admin" : "Admins"}</span>
+            {admins.map((m) => (
+              <span key={m.id} className={styles.reviewNoticeAdmin}>
+                <Avatar name={m.name} color={m.color} fg={m.fg} size="sm" />
+                {m.name}
+              </span>
+            ))}
+          </div>
+        )}
+        <p className={styles.reviewNoticeMeta}>
+          {slides.length} {slides.length === 1 ? "photo" : "photos"} · {post.draft.caption.trim() ? "caption added" : "no caption yet"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const POST_STEPS: { label: string; sub: string }[] = [
+  { label: "Photos", sub: "Upload and vote" },
+  { label: "Details", sub: "Caption, audio, tags" },
+  { label: "Review", sub: "Check and share" },
+];
+
+function StepBar({
+  step,
+  isDone,
+  canGoTo,
+  onGo,
+}: {
+  step: PostStep;
+  isDone: (i: PostStep) => boolean;
+  canGoTo: (i: PostStep) => boolean;
+  onGo: (i: PostStep) => void;
+}) {
+  return (
+    <ol className={styles.stepBar} aria-label="Post steps">
+      {POST_STEPS.map((s, idx) => {
+        const i = idx as PostStep;
+        const done = isDone(i);
+        const on = step === i;
+        return (
+          <li key={s.label} className={styles.stepCell}>
+            <button
+              type="button"
+              className={`${styles.stepItem} ${on ? styles.stepItemOn : ""} ${done && !on ? styles.stepItemDone : ""}`}
+              disabled={!canGoTo(i)}
+              aria-current={on ? "step" : undefined}
+              onClick={() => onGo(i)}
+            >
+              <span className={styles.stepNum}>{done && !on ? <Icon name="check" size={14} /> : idx + 1}</span>
+              <span className={styles.stepText}>
+                <b>{s.label}</b>
+                <small>{done && !on ? "Done" : s.sub}</small>
+              </span>
+            </button>
+            {idx < POST_STEPS.length - 1 && <span className={`${styles.stepLine} ${done ? styles.stepLineDone : ""}`} />}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+const SUGGESTED_AUDIO = ["Golden Hour · JVKE", "Good Days · SZA", "Sunday Best · Surfaces", "Island in the Sun · Weezer", "Electric Feel · MGMT"];
+
+type DraftFieldName = "caption" | "audio" | "people" | "products" | "location" | "account" | "audience" | "shareOn" | "more";
+
+// One editable piece of the post draft. Used by the Details step and by the
+// quick-edit dropdowns on the Review step, so both always stay in sync.
+function DraftField({
+  field,
+  group,
+  post,
+  onUpdateDraft,
+  onOpenInstagram,
+}: {
+  field: DraftFieldName;
+  group: Group;
+  post: PostCard;
+  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
+  onOpenInstagram: () => void;
+}) {
+  const [audioQuery, setAudioQuery] = useState("");
+  const [personInput, setPersonInput] = useState("");
+  const [productInput, setProductInput] = useState("");
+  const d = post.draft;
+  const set = (patch: Partial<Draft>) => onUpdateDraft((draft) => ({ ...draft, ...patch }));
+
+  const tagged = d.taggedPeople ?? [];
+  const products = d.taggedProducts ?? [];
+  const accounts = group.instagramAccounts;
+  const account = accounts.find((a) => a.id === d.instagramAccountId) ?? accounts[0];
+  const locationIdeas = [group.name, "Lawrence, Kansas", "University of Kansas", "Massachusetts Street"].filter((l) => l !== d.location);
+  const audioMatches = audioQuery.trim()
+    ? SUGGESTED_AUDIO.filter((a) => a.toLowerCase().includes(audioQuery.trim().toLowerCase()))
+    : SUGGESTED_AUDIO;
+
+  const addPerson = (raw: string) => {
+    const h = normalizeHandle(raw);
+    if (!h || tagged.includes(h)) return;
+    set({ taggedPeople: [...tagged, h] });
+  };
+  const removePerson = (h: string) => set({ taggedPeople: tagged.filter((x) => x !== h) });
+  const addProduct = (raw: string) => {
+    const p = raw.trim();
+    if (!p || products.includes(p)) return;
+    set({ taggedProducts: [...products, p] });
+  };
+  const teamHandles = new Set(group.members.map((m) => normalizeHandle(m.username || m.name)));
+  const otherTagged = tagged.filter((h) => !teamHandles.has(h));
+
+  if (field === "caption")
+    return (
+      <div className={styles.field}>
+        <label htmlFor="dcaption">Caption</label>
+        <textarea
+          id="dcaption"
+          className={`${styles.captionBox} ${styles.captionTall}`}
+          value={d.caption}
+          onChange={(e) => set({ caption: e.target.value })}
+          placeholder="Write a caption. Tag people and brands with @."
+        />
+        <span className={styles.fieldCount}>{d.caption.length} / 2,200</span>
+      </div>
+    );
+  if (field === "audio")
+    return (
+      <div className={styles.field}>
+        <label htmlFor="daudio">
+          <Icon name="music" size={13} /> Audio <span className={styles.fieldNote}>(optional)</span>
+        </label>
+        {d.audio ? (
+          <div className={styles.picked}>
+            <Icon name="music" size={14} />
+            <span>{d.audio}</span>
+            <button type="button" className={styles.iconClose} onClick={() => set({ audio: undefined })} title="Remove audio">
+              <Icon name="x" size={13} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <input id="daudio" className={styles.input} value={audioQuery} onChange={(e) => setAudioQuery(e.target.value)} placeholder="Search music" />
+            <div className={styles.chipRow}>
+              {audioMatches.slice(0, 3).map((a) => (
+                <button key={a} type="button" className={styles.pchip} onClick={() => set({ audio: a })}>
+                  {a}
+                </button>
+              ))}
+              {audioMatches.length === 0 && <span className={styles.hint}>No songs match “{audioQuery}”.</span>}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  if (field === "people")
+    return (
+      <div className={styles.field}>
+        <label>
+          <Icon name="user" size={13} /> Tag people
+        </label>
+        <div className={styles.chipRow}>
+          {group.members.map((m) => {
+            const h = normalizeHandle(m.username || m.name);
+            const on = tagged.includes(h);
+            return (
+              <button key={m.id} type="button" className={`${styles.pchip} ${on ? styles.pchipOn : ""}`} aria-pressed={on} onClick={() => (on ? removePerson(h) : addPerson(h))}>
+                {on && <Icon name="check" size={12} />} {m.name}
+              </button>
+            );
+          })}
+          {otherTagged.map((h) => (
+            <button key={h} type="button" className={`${styles.pchip} ${styles.pchipOn}`} onClick={() => removePerson(h)} title="Remove tag">
+              {h} <Icon name="x" size={11} />
+            </button>
+          ))}
+        </div>
+        <form
+          className={styles.inlineAdd}
+          onSubmit={(e) => {
+            e.preventDefault();
+            addPerson(personInput);
+            setPersonInput("");
+          }}
+        >
+          <input className={styles.input} value={personInput} onChange={(e) => setPersonInput(e.target.value)} placeholder="Tag someone else, e.g. @username" aria-label="Tag someone else" />
+          <button type="submit" className={styles.btnGhost2} disabled={!personInput.trim()}>
+            Tag
+          </button>
+        </form>
+      </div>
+    );
+  if (field === "products")
+    return (
+      <div className={styles.field}>
+        <label>
+          <Icon name="bag" size={13} /> Tag products <span className={styles.fieldNote}>(optional)</span>
+        </label>
+        <form
+          className={styles.inlineAdd}
+          onSubmit={(e) => {
+            e.preventDefault();
+            addProduct(productInput);
+            setProductInput("");
+          }}
+        >
+          <input className={styles.input} value={productInput} onChange={(e) => setProductInput(e.target.value)} placeholder="Product name" aria-label="Product name" />
+          <button type="submit" className={styles.btnGhost2} disabled={!productInput.trim()}>
+            Add
+          </button>
+        </form>
+        {products.length > 0 && (
+          <div className={styles.chipRow}>
+            {products.map((p) => (
+              <button key={p} type="button" className={`${styles.pchip} ${styles.pchipOn}`} onClick={() => set({ taggedProducts: products.filter((x) => x !== p) })} title="Remove">
+                {p} <Icon name="x" size={11} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  if (field === "location")
+    return (
+      <div className={styles.field}>
+        <label htmlFor="dlocation">
+          <Icon name="pin" size={13} /> Location <span className={styles.fieldNote}>(optional)</span>
+        </label>
+        <input id="dlocation" className={styles.input} value={d.location ?? ""} onChange={(e) => set({ location: e.target.value })} placeholder="Add location" />
+        {!d.location && (
+          <div className={styles.chipRow}>
+            {locationIdeas.slice(0, 3).map((l) => (
+              <button key={l} type="button" className={styles.pchip} onClick={() => set({ location: l })}>
+                {l}
+              </button>
+            ))}
+          </div>
+        )}
+        <span className={styles.fieldHelp}>Anyone who sees the post can see this location.</span>
+      </div>
+    );
+  if (field === "account")
+    return (
+      <div className={styles.field}>
+        <label htmlFor="daccount">
+          <Icon name="instagram" size={13} /> Post to
+        </label>
+        {accounts.length === 0 ? (
+          <button type="button" className={styles.linkIgHint} onClick={onOpenInstagram}>
+            <Icon name="instagram" size={12} /> Link an Instagram account to post
+          </button>
+        ) : (
+          <select id="daccount" className={styles.input} value={account?.id ?? ""} onChange={(e) => set({ instagramAccountId: e.target.value })}>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.handle}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    );
+  if (field === "audience")
+    return (
+      <div className={styles.field}>
+        <label>
+          <Icon name="eye" size={13} /> Audience
+        </label>
+        <div className={`${styles.roleToggle} ${styles.toggleFull}`}>
+          <button type="button" className={`${styles.roleBtn} ${d.audience !== "close" ? styles.roleBtnOn : ""}`} onClick={() => set({ audience: "everyone" })}>
+            Everyone
+          </button>
+          <button type="button" className={`${styles.roleBtn} ${d.audience === "close" ? styles.roleBtnOn : ""}`} onClick={() => set({ audience: "close" })}>
+            Close friends
+          </button>
+        </div>
+      </div>
+    );
+  if (field === "shareOn")
+    return (
+      <div className={styles.field}>
+        <label>
+          <Icon name="share" size={13} /> Also share on
+        </label>
+        <label className={styles.switchRow}>
+          <span>Facebook</span>
+          <input type="checkbox" className={styles.switch} checked={!!d.shareFacebook} onChange={(e) => set({ shareFacebook: e.target.checked })} />
+        </label>
+        <label className={styles.switchRow}>
+          <span>Threads</span>
+          <input type="checkbox" className={styles.switch} checked={!!d.shareThreads} onChange={(e) => set({ shareThreads: e.target.checked })} />
+        </label>
+      </div>
+    );
+  if (field === "more")
+    return (
+      <div className={styles.field}>
+        <label>
+          <Icon name="sliders" size={13} /> More options
+        </label>
+        <label className={styles.switchRow}>
+          <span>Hide like count</span>
+          <input type="checkbox" className={styles.switch} checked={!!d.hideLikeCount} onChange={(e) => set({ hideLikeCount: e.target.checked })} />
+        </label>
+        <label className={styles.switchRow}>
+          <span>Turn off commenting</span>
+          <input type="checkbox" className={styles.switch} checked={!!d.commentsOff} onChange={(e) => set({ commentsOff: e.target.checked })} />
+        </label>
+        <label className={styles.switchRow}>
+          <span>
+            Add AI label
+            <small>Required for realistic photos made with AI</small>
+          </span>
+          <input type="checkbox" className={styles.switch} checked={!!d.aiLabel} onChange={(e) => set({ aiLabel: e.target.checked })} />
+        </label>
+      </div>
+    );
+  return null;
+}
+
+function DetailsStep({
+  group,
+  post,
+  slides,
+  onUpdateDraft,
+  onOpenInstagram,
+}: {
+  group: Group;
+  post: PostCard;
+  slides: Photo[];
+  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
+  onOpenInstagram: () => void;
+}) {
+  const fieldProps = { group, post, onUpdateDraft, onOpenInstagram };
+
+  const [shown, setShown] = useState(0);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const goToSlide = (i: number) => {
+    const t = trackRef.current;
+    if (!t) return;
+    const next = Math.max(0, Math.min(slides.length - 1, i));
+    t.scrollTo({ left: next * t.clientWidth, behavior: "smooth" });
+  };
+  const onTrackScroll = () => {
+    const t = trackRef.current;
+    if (t && t.clientWidth) setShown(Math.round(t.scrollLeft / t.clientWidth));
+  };
+  const current = Math.min(shown, Math.max(0, slides.length - 1));
+
+  return (
+    <div className={styles.detailsBento}>
+      {/* ---- Left: photo viewer (full height) ---- */}
+      <section className={`${styles.dCard} ${styles.viewerCard} ${styles.bentoPhoto}`} aria-label="Carousel photos">
+        <div className={styles.dCardHead}>
+          <h3>Carousel</h3>
+          <span className={styles.hint}>
+            {slides.length === 0 ? "No photos yet" : `${current + 1} of ${slides.length}`}
+          </span>
+        </div>
+        <div className={styles.viewerStage}>
+          <div ref={trackRef} className={styles.viewerTrack} onScroll={onTrackScroll}>
+            {slides.length === 0 ? (
+              <div className={styles.viewerSlide}>
+                <PhotoThumb photo={null} />
+              </div>
+            ) : (
+              slides.map((p, i) => (
+                <div key={p.id} className={styles.viewerSlide} aria-label={`Photo ${i + 1} of ${slides.length}`}>
+                  <PhotoThumb photo={p} />
+                </div>
+              ))
+            )}
+          </div>
+          {slides.length > 1 && (
+            <>
+              <button type="button" className={`${styles.viewerNav} ${styles.viewerNavL}`} onClick={() => goToSlide(current - 1)} disabled={current === 0} aria-label="Previous photo">
+                <Icon name="l" size={18} />
+              </button>
+              <button type="button" className={`${styles.viewerNav} ${styles.viewerNavR}`} onClick={() => goToSlide(current + 1)} disabled={current === slides.length - 1} aria-label="Next photo">
+                <Icon name="r" size={18} />
+              </button>
+            </>
+          )}
+        </div>
+        {slides.length > 1 && (
+          <div className={styles.viewerThumbs}>
+            {slides.map((p, i) => (
+              <button key={p.id} type="button" className={`${styles.viewerThumb} ${i === current ? styles.viewerThumbOn : ""}`} onClick={() => goToSlide(i)} aria-label={`Show photo ${i + 1}`} aria-current={i === current}>
+                <PhotoThumb photo={p} />
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ---- Right: everything else, in two columns ---- */}
+      <section className={`${styles.dCard} ${styles.bentoInfo}`} aria-label="Post details">
+        <div className={styles.bentoCol}>
+          <h3 className={styles.bentoTitle}>Caption &amp; audio</h3>
+          <DraftField field="caption" {...fieldProps} />
+
+          <DraftField field="audio" {...fieldProps} />
+          <h3 className={`${styles.bentoTitle} ${styles.bentoTitleGap}`}>Tags</h3>
+          <DraftField field="people" {...fieldProps} />
+
+          <DraftField field="products" {...fieldProps} />
+
+        </div>
+        <div className={styles.bentoCol}>
+          <h3 className={styles.bentoTitle}>Location &amp; sharing</h3>
+          <DraftField field="location" {...fieldProps} />
+          <DraftField field="account" {...fieldProps} />
+
+          <DraftField field="audience" {...fieldProps} />
+
+          <DraftField field="shareOn" {...fieldProps} />
+
+          <DraftField field="more" {...fieldProps} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReviewStep({
+  group,
+  post,
+  slides,
+  handle,
+  credits,
+  inCount,
+  threshold,
+  mode,
+  setMode,
+  scheduleAt,
+  setScheduleAt,
+  onEdit,
+  onUpdateDraft,
+  onOpenInstagram,
+}: {
+  group: Group;
+  post: PostCard;
+  slides: Photo[];
+  handle: string;
+  credits: string[];
+  inCount: number;
+  threshold: number;
+  mode: "now" | "later";
+  setMode: (m: "now" | "later") => void;
+  scheduleAt: string;
+  setScheduleAt: (v: string) => void;
+  onEdit: (step: PostStep) => void;
+  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
+  onOpenInstagram: () => void;
+}) {
+  const d = post.draft;
+  const [editing, setEditing] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: MouseEvent) => {
+      const open = listRef.current?.querySelector("[data-open='true']");
+      if (open && !open.contains(e.target as Node)) setEditing(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditing(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [editing]);
+
+  const fieldProps = { group, post, onUpdateDraft, onOpenInstagram };
+  const tagged = d.taggedPeople ?? [];
+  const products = d.taggedProducts ?? [];
+  const shareOn = [d.shareFacebook && "Facebook", d.shareThreads && "Threads"].filter(Boolean).join(", ");
+  const extras = [d.hideLikeCount && "Like count hidden", d.commentsOff && "Comments off", d.aiLabel && "AI label"].filter(Boolean).join(" · ");
+
+  const renderItem = (label: string, value: string | undefined, empty: string, editor: ReactNode) => {
+    const open = editing === label;
+    return (
+      <div key={label} className={`${styles.sumRow} ${open ? styles.sumRowOpen : ""}`} data-open={open}>
+        <span className={styles.sumLabel}>{label}</span>
+        <span className={value ? styles.sumValue : `${styles.sumValue} ${styles.sumEmpty}`}>{value || empty}</span>
+        {!post.posted && (
+          <button type="button" className={styles.linkBtn} onClick={() => setEditing(open ? null : label)} aria-expanded={open}>
+            {open ? "Done" : "Edit"} <Icon name="chev" size={12} />
+          </button>
+        )}
+        {open && (
+          <div className={styles.quickEdit} role="dialog" aria-label={`Edit ${label.toLowerCase()}`}>
+            {editor}
+            <div className={styles.quickEditFoot}>
+              <button type="button" className={styles.btnSm} onClick={() => setEditing(null)}>
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  const removeSlide = (id: string) => onUpdateDraft((draft) => ({ ...draft, slideIds: draft.slideIds.filter((x) => x !== id) }));
+
+  return (
+    <div className={styles.reviewLayout}>
+      <div className={styles.reviewPhone}>
+        <InstagramPreviewCard group={group} post={post} slides={slides} handle={handle} />
+      </div>
+      <div className={styles.reviewSummary}>
+        <h3>Everything look right?</h3>
+        <p className={styles.hint}>This is exactly what will go out. Fix anything here before you share.</p>
+        <div ref={listRef} className={styles.sumList}>
+          {renderItem(
+            "Photos",
+            `${slides.length} ${slides.length === 1 ? "photo" : "photos"} · ${inCount} with ${threshold}+ thumbs up`,
+            "No photos yet",
+            <div className={styles.field}>
+              <label>In the carousel</label>
+              <div className={styles.quickThumbs}>
+                {slides.map((p, i) => (
+                  <span key={p.id} className={styles.quickThumb}>
+                    <PhotoThumb photo={p} />
+                    <button type="button" onClick={() => removeSlide(p.id)} title="Remove from carousel" aria-label={`Remove photo ${i + 1} from carousel`}>
+                      <Icon name="x" size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <button type="button" className={styles.linkBtn} onClick={() => onEdit(0)}>
+                Add or vote on photos
+              </button>
+            </div>
+          )}
+          {renderItem("Caption", d.caption.trim() ? d.caption : undefined, "No caption", <DraftField field="caption" {...fieldProps} />)}
+          {renderItem("Audio", d.audio, "No audio", <DraftField field="audio" {...fieldProps} />)}
+          {renderItem("Tagged", tagged.join(", "), "No one tagged", <DraftField field="people" {...fieldProps} />)}
+          {renderItem("Products", products.join(", "), "None", <DraftField field="products" {...fieldProps} />)}
+          {renderItem("Location", d.location, "No location", <DraftField field="location" {...fieldProps} />)}
+          {renderItem("Post to", handle, "Not linked", <DraftField field="account" {...fieldProps} />)}
+          {renderItem("Audience", d.audience === "close" ? "Close friends" : "Everyone", "", <DraftField field="audience" {...fieldProps} />)}
+          {renderItem("Also share on", shareOn, "Off", <DraftField field="shareOn" {...fieldProps} />)}
+          {renderItem("Settings", extras, "Defaults", <DraftField field="more" {...fieldProps} />)}
+          <div className={styles.sumRow}>
+            <span className={styles.sumLabel}>Credits</span>
+            <span className={styles.sumValue}>{credits.length ? credits.map((c) => `Shot by ${c}`).join(" · ") : "—"}</span>
+          </div>
+        </div>
+
+        {!post.posted && (
+          <div className={styles.field}>
+            <label>When</label>
+            <div className={styles.roleToggle}>
+              <button type="button" className={`${styles.roleBtn} ${mode === "now" ? styles.roleBtnOn : ""}`} onClick={() => setMode("now")}>
+                Post now
+              </button>
+              <button type="button" className={`${styles.roleBtn} ${mode === "later" ? styles.roleBtnOn : ""}`} onClick={() => setMode("later")}>
+                Schedule
+              </button>
+            </div>
+            {mode === "later" && <input type="datetime-local" className={styles.input} value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} />}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InstagramPreviewCard({ group, post, slides, handle: handleIn }: { group: Group; post: PostCard; slides: Photo[]; handle?: string }) {
   const [pvIndex, setPvIndex] = useState(0);
   const activeIndex = Math.min(pvIndex, Math.max(0, slides.length - 1));
-  const handle = primaryHandle(group).replace(/^@/, "");
+  const handle = (handleIn ?? primaryHandle(group)).replace(/^@/, "");
+  const d = post.draft;
+  const sub = [d.location, d.audio && `♪ ${d.audio}`].filter(Boolean) as string[];
 
   return (
     <div className={styles.pvCard}>
       <div className={styles.pvHead}>
-        <span className={styles.groupIcon} style={{ "--c": group.color, width: "26px", height: "26px", borderRadius: "50%", fontSize: "10px" } as CSSProperties}>
+        <span className={styles.groupIcon} style={{ "--c": group.color, width: "30px", height: "30px", borderRadius: "50%", fontSize: "11px" } as CSSProperties}>
           {initials(group.name)}
         </span>
-        <b>{handle}</b>
+        <span className={styles.pvWho}>
+          <b>{handle}</b>
+          {sub.map((s) => (
+            <small key={s}>{s}</small>
+          ))}
+        </span>
       </div>
       <div className={styles.pvImage}>
         {slides.length === 0 ? (
@@ -2432,8 +3326,16 @@ function InstagramPreviewCard({ group, post, slides }: { group: Group; post: Pos
         ) : (
           <>
             <PhotoThumb photo={slides[activeIndex]} />
+            {(d.taggedPeople?.length ?? 0) > 0 && (
+              <span className={styles.pvTag} title={d.taggedPeople!.join(", ")}>
+                <Icon name="user" size={12} />
+              </span>
+            )}
             {slides.length > 1 && (
               <>
+                <span className={styles.pvCount}>
+                  {activeIndex + 1}/{slides.length}
+                </span>
                 <button className={`${styles.pvNav} ${styles.pvNavL}`} disabled={activeIndex === 0} onClick={() => setPvIndex((i) => Math.max(0, i - 1))}>
                   <Icon name="l" size={14} />
                 </button>
@@ -2455,177 +3357,18 @@ function InstagramPreviewCard({ group, post, slides }: { group: Group; post: Pos
         )}
       </div>
       <div className={styles.pvIcons}>
-        <Icon name="heart" size={20} />
-        <Icon name="comment" size={20} />
-        <Icon name="send" size={20} />
+        <Icon name="heart" size={22} />
+        {!d.commentsOff && <Icon name="comment" size={22} />}
+        <Icon name="send" size={22} />
       </div>
+      {!d.hideLikeCount && <div className={styles.pvLikes}>Be the first to like this</div>}
       <div className={styles.pvCaption}>
-        <b>{handle}</b> {post.draft.caption || <span className={styles.hint}>No caption yet</span>}
+        <b>{handle}</b> {d.caption || <span className={styles.hint}>No caption yet</span>}
       </div>
-      {post.draft.location && <div className={styles.pvLocation}>{post.draft.location}</div>}
+      {d.aiLabel && <div className={styles.pvLocation}>AI info</div>}
     </div>
   );
 }
-
-function FinalizePostModal({
-  group,
-  post,
-  slides,
-  isAdmin,
-  canPost,
-  onUpdateDraft,
-  onSetPosted,
-  onSchedule,
-  onOpenInstagram,
-  onClose,
-}: {
-  group: Group;
-  post: PostCard;
-  slides: Photo[];
-  isAdmin: boolean;
-  canPost: boolean;
-  onUpdateDraft: (fn: (draft: Draft) => Draft) => void;
-  onSetPosted: (posted: boolean) => void;
-  onSchedule: (scheduledFor: number) => void;
-  onOpenInstagram: () => void;
-  onClose: () => void;
-}) {
-  const accounts = group.instagramAccounts;
-  const [mode, setMode] = useState<"now" | "later">(post.scheduledFor ? "later" : "now");
-  const [scheduleAt, setScheduleAt] = useState(() => toDatetimeLocal(post.scheduledFor ?? Date.now() + 60 * 60000));
-  const selectedAccountId = post.draft.instagramAccountId ?? accounts[0]?.id ?? "";
-
-  const disabled = !isAdmin || !canPost || slides.length === 0;
-  const disabledReason = !isAdmin
-    ? "Only admins can post"
-    : !canPost
-      ? "Link an Instagram account first"
-      : slides.length === 0
-        ? "Add at least one photo first"
-        : undefined;
-
-  const submit = () => {
-    if (disabled) return;
-    if (mode === "later") {
-      const ts = new Date(scheduleAt).getTime();
-      if (!Number.isFinite(ts)) return;
-      onSchedule(ts);
-    } else {
-      onSetPosted(true);
-    }
-    onClose();
-  };
-
-  return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={`${styles.modal} ${styles.finalizeModal}`} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.finalizeHead}>
-          <h2>Preview &amp; finalize</h2>
-          <button className={styles.iconClose} onClick={onClose} title="Close">
-            <Icon name="x" size={16} />
-          </button>
-        </div>
-        <div className={styles.finalizeBody}>
-          <InstagramPreviewCard group={group} post={post} slides={slides} />
-          <div className={styles.finalizeOptions}>
-            <div className={styles.field}>
-              <label htmlFor="fcaption">Caption</label>
-              <textarea
-                id="fcaption"
-                className={styles.captionBox}
-                value={post.draft.caption}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, caption: e.target.value }))}
-                placeholder="Write a caption. Tag people and brands with @."
-              />
-            </div>
-
-            {accounts.length > 0 ? (
-              <div className={styles.field}>
-                <label htmlFor="faccount">Post to</label>
-                <select
-                  id="faccount"
-                  className={styles.input}
-                  value={selectedAccountId}
-                  onChange={(e) => onUpdateDraft((draft) => ({ ...draft, instagramAccountId: e.target.value }))}
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.handle}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <button type="button" className={styles.linkIgHint} onClick={onOpenInstagram}>
-                <Icon name="instagram" size={12} /> Link an Instagram account to post
-              </button>
-            )}
-
-            <div className={styles.field}>
-              <label htmlFor="flocation">
-                Location <span className={styles.fieldNote}>(optional)</span>
-              </label>
-              <input
-                id="flocation"
-                className={styles.input}
-                value={post.draft.location ?? ""}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, location: e.target.value }))}
-                placeholder="Add location"
-              />
-            </div>
-
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={!!post.draft.hideLikeCount}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, hideLikeCount: e.target.checked }))}
-              />
-              Hide like count on this post
-            </label>
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={!!post.draft.commentsOff}
-                onChange={(e) => onUpdateDraft((draft) => ({ ...draft, commentsOff: e.target.checked }))}
-              />
-              Turn off commenting
-            </label>
-
-            <div className={styles.field}>
-              <label>When</label>
-              <div className={styles.roleToggle}>
-                <button type="button" className={`${styles.roleBtn} ${mode === "now" ? styles.roleBtnOn : ""}`} onClick={() => setMode("now")}>
-                  Post now
-                </button>
-                <button type="button" className={`${styles.roleBtn} ${mode === "later" ? styles.roleBtnOn : ""}`} onClick={() => setMode("later")}>
-                  Schedule
-                </button>
-              </div>
-              {mode === "later" && (
-                <input
-                  type="datetime-local"
-                  className={styles.input}
-                  value={scheduleAt}
-                  onChange={(e) => setScheduleAt(e.target.value)}
-                />
-              )}
-            </div>
-
-            <div className={styles.modalActions}>
-              <button type="button" className={styles.btnGhost} onClick={onClose}>
-                Cancel
-              </button>
-              <button type="button" className={styles.btnPrimary} disabled={disabled} title={disabledReason} onClick={submit}>
-                {mode === "later" ? "Schedule post" : "Post now"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function MediaPage({
   group,
   onAddMedia,

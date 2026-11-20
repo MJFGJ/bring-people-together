@@ -2156,3 +2156,1027 @@
   color: var(--ink-3);
   cursor: default;
 }
+
+/* ---------- group invites ---------- */
+.inviteList {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 22px;
+  padding: 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.inviteList h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+  font: 500 14px var(--f-display);
+  color: var(--accent);
+}
+.inviteCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.inviteCard .groupInfo {
+  flex: 1;
+  min-width: 0;
+}
+.inviteActions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.memberRowTagged {
+  grid-template-columns: auto 1fr auto auto;
+}
+.teamRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+.teamName {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pendingList {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.pendingList h3 {
+  margin: 0 0 4px;
+  font: 500 13px var(--f-display);
+  color: var(--ink-2);
+}
+.pendingIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+@media (max-width: 560px) {
+  .inviteCard {
+    flex-wrap: wrap;
+  }
+  .inviteActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* ---------- role tag next to your name ---------- */
+.roleTag {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.roleTagAdmin {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+/* ---------- step-by-step post flow: Photos, Details, Review ---------- */
+.flowPage {
+  padding-bottom: 0;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.stepBar {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.stepCell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.stepCell:last-child {
+  flex: none;
+}
+.stepItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 8px;
+  border-radius: 12px;
+  text-align: left;
+  min-width: 0;
+}
+.stepItem:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.page .stepItem:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.stepNum {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-weight: 600;
+  font-size: 13px;
+  border: 1.5px solid var(--line);
+  color: var(--ink-3);
+  background: var(--surface);
+}
+.stepText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.stepText b {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.stepText small {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stepItemOn .stepNum {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.stepItemOn .stepText b {
+  color: var(--ink);
+}
+.stepItemDone .stepNum {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: #fff;
+}
+.stepItemDone .stepText b {
+  color: var(--ink);
+}
+.stepLine {
+  flex: 1;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--line);
+  min-width: 16px;
+}
+.stepLineDone {
+  background: var(--ok);
+}
+
+.flowFooter {
+  position: sticky;
+  bottom: 0;
+  margin: auto -28px 0;
+  padding: 14px 160px 14px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--line);
+  z-index: 5;
+}
+.flowPage > .postLayout,
+.flowPage > .reviewLayout {
+  margin-bottom: 28px;
+}
+.flowFooterRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.footerHint {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.linkBtn {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+}
+.linkBtn:hover {
+  text-decoration: underline;
+}
+.confirmText {
+  margin-top: 8px !important;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+/* details */
+.detailsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  gap: 20px;
+  margin-top: 20px;
+  margin-bottom: 28px;
+  align-items: start;
+}
+.dCard {
+  min-width: 0;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+.dCardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.dCardHead h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+.dCard .field label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dCard .field:first-of-type {
+  margin-top: 10px;
+}
+.thumbStrip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-top: 10px;
+  padding-bottom: 2px;
+}
+.thumbStripItem {
+  flex: none;
+  width: 64px;
+  aspect-ratio: 4 / 5;
+  border-radius: 8px;
+  overflow: hidden;
+  display: block;
+}
+.thumbStripItem .ph {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.captionTall {
+  min-height: 150px;
+  line-height: 1.5;
+}
+.captionBox:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.fieldCount {
+  align-self: flex-end;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.fieldHelp {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.picked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  font-weight: 500;
+}
+.picked span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inlineAdd {
+  display: flex;
+  gap: 8px;
+}
+.pchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.pchip:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+.pchipOn {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.toggleFull .roleBtn {
+  flex: 1;
+}
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.switchRow span {
+  display: flex;
+  flex-direction: column;
+}
+.switchRow small {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.switch {
+  appearance: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--line);
+  position: relative;
+  flex: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s;
+}
+.switch:checked {
+  background: var(--accent);
+}
+.switch:checked::after {
+  transform: translateX(18px);
+}
+
+/* review */
+.reviewLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  gap: 28px;
+  margin-top: 24px;
+  align-items: start;
+  max-width: 1040px;
+  width: 100%;
+  margin-inline: auto;
+}
+.reviewPhone {
+  background: var(--surface);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.reviewPhone .pvImage {
+  aspect-ratio: 4 / 5;
+}
+.reviewSummary {
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+.reviewSummary h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+.sumList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.sumRow {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+.sumLabel {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.sumValue {
+  font-size: 13.5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.sumEmpty {
+  color: var(--ink-3);
+}
+.pvWho {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+.pvWho small {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pvTag,
+.pvCount {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.pvTag {
+  left: 10px;
+  bottom: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+.pvCount {
+  top: 10px;
+  right: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+.pvLikes {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 0 2px 4px;
+}
+
+@media (max-width: 1180px) {
+  .detailsGrid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .detailsGrid > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 860px) {
+  .detailsGrid {
+    grid-template-columns: 1fr;
+  }
+  .reviewLayout {
+    grid-template-columns: 1fr;
+  }
+  .stepText small {
+    display: none;
+  }
+}
+@media (max-width: 560px) {
+  .stepText {
+    display: none;
+  }
+  .stepCell:last-child {
+    flex: none;
+  }
+  .flowFooter {
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+}
+.confirmActions > button {
+  flex: 1;
+  width: auto;
+  height: 40px;
+}
+
+
+/* ---------- Details step: big photo viewer + scrolling form ---------- */
+.detailsTwo {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 20px;
+  margin-top: 20px;
+  margin-bottom: 20px;
+  height: max(520px, calc(100vh - 360px));
+}
+.viewerCard,
+.formCard {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.viewerStage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.viewerTrack {
+  display: flex;
+  height: 100%;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.viewerTrack::-webkit-scrollbar {
+  display: none;
+}
+.viewerSlide {
+  flex: 0 0 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  scroll-snap-align: center;
+}
+.viewerSlide .ph {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: 4 / 5;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.25);
+}
+.viewerNav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3), 0 2px 8px rgba(60, 64, 67, 0.15);
+  transition: opacity 0.15s;
+}
+.viewerNav:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+.viewerNavL {
+  left: 12px;
+}
+.viewerNavR {
+  right: 12px;
+}
+.viewerThumbs {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  overflow-x: auto;
+  flex: none;
+  padding: 2px;
+}
+.viewerThumb {
+  flex: none;
+  width: 56px;
+  height: 70px;
+  border-radius: 8px;
+  overflow: hidden;
+  opacity: 0.55;
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+.viewerThumb:hover {
+  opacity: 0.85;
+}
+.viewerThumbOn {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.viewerThumb .ph {
+  height: 100%;
+}
+.formCard {
+  overflow-y: auto;
+  padding-top: 4px;
+}
+.formSection {
+  padding: 14px 0 18px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+}
+.formSection:last-child {
+  border-bottom: 0;
+}
+.formSection > h3 {
+  margin: 0;
+  font: 500 16px var(--f-display);
+  color: var(--ink);
+}
+.formSection .field {
+  margin: 0;
+}
+@media (max-width: 960px) {
+  .detailsTwo {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .viewerStage {
+    height: min(70vh, 560px);
+    flex: none;
+  }
+  .formCard {
+    overflow: visible;
+  }
+}
+
+/* ---------- Details step: photo top-left, caption below, info on the right ---------- */
+.detailsBento {
+  --bento-h: calc(100vh - 348px);
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.5fr);
+  grid-template-areas: "photo info";
+  gap: 16px;
+  margin: 16px 0 12px;
+  height: max(500px, var(--bento-h));
+}
+.detailsBento > .dCard {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+}
+.bentoPhoto {
+  grid-area: photo;
+}
+.bentoCaption {
+  grid-area: caption;
+  display: flex;
+  flex-direction: column;
+}
+.bentoInfo {
+  grid-area: info;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-content: start;
+}
+.bentoCol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bentoTitle {
+  margin: 0;
+  font: 500 15px var(--f-display);
+  color: var(--ink);
+}
+.detailsBento .dCardHead {
+  margin-bottom: 8px;
+}
+.detailsBento .dCardHead h3 {
+  font-size: 15px;
+}
+.detailsBento .field {
+  margin-top: 8px;
+  gap: 4px;
+}
+.detailsBento .input {
+  height: 34px;
+  font-size: 13.5px;
+}
+.detailsBento .pchip {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.detailsBento .switchRow {
+  padding: 2px 0;
+  font-size: 13px;
+}
+.detailsBento .fieldHelp {
+  font-size: 11.5px;
+}
+.detailsBento .viewerSlide {
+  padding: 10px;
+}
+.detailsBento .viewerThumbs {
+  margin-top: 8px;
+}
+.detailsBento .viewerThumb {
+  width: 40px;
+  height: 50px;
+}
+.bentoCaption .field:first-of-type {
+  flex: 1;
+  min-height: 0;
+}
+.bentoCaption .captionTall {
+  flex: 1;
+  min-height: 56px;
+  resize: none;
+}
+@media (max-width: 1100px) {
+  .detailsBento {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "photo"
+      "info";
+    height: auto;
+  }
+  .bentoPhoto .viewerStage {
+    height: min(60vh, 480px);
+    flex: none;
+  }
+  .detailsBento > .dCard {
+    overflow: visible;
+  }
+}
+@media (max-width: 640px) {
+  .bentoInfo {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bentoTitleGap {
+  margin-top: 18px;
+}
+.bentoInfo .bentoCol > .field:first-of-type {
+  margin-top: 8px;
+}
+.bentoInfo .captionTall {
+  min-height: 84px;
+  resize: none;
+}
+
+/* ---------- Review step: fit on one screen ---------- */
+.flowPage > .reviewLayout {
+  --rv-h: max(500px, calc(100vh - 348px));
+  /* phone preview width follows the available height so the 4:5 photo never overflows */
+  grid-template-columns: calc((var(--rv-h) - 168px) * 0.8 + 28px) minmax(0, 1fr);
+  height: var(--rv-h);
+  max-width: none;
+  margin: 16px 0 12px;
+  gap: 20px;
+  align-items: stretch;
+}
+.flowPage > .reviewLayout > .reviewPhone {
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+}
+.reviewPhone .pvCaption {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.flowPage > .reviewLayout > .reviewSummary {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+}
+.reviewLayout .sumList {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 28px;
+  margin-top: 10px;
+  border-top: 0;
+}
+.reviewLayout .sumRow {
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  padding: 9px 0;
+}
+.reviewLayout .sumValue {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.reviewSummary > .field {
+  margin-top: auto;
+  padding-top: 12px;
+}
+@media (max-width: 1100px) {
+  .flowPage > .reviewLayout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .reviewLayout .sumList {
+    grid-template-columns: 1fr;
+  }
+  .flowPage > .reviewLayout > .reviewPhone {
+    max-width: 420px;
+    width: 100%;
+    margin-inline: auto;
+  }
+}
+
+/* ---------- Review: quick-edit dropdowns ---------- */
+.flowPage > .reviewLayout > .reviewSummary {
+  overflow: visible;
+}
+.reviewLayout .sumRow {
+  position: relative;
+}
+.reviewLayout .sumRow .linkBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.reviewLayout .sumRow .linkBtn svg {
+  transition: transform 0.15s;
+}
+.sumRowOpen .linkBtn svg {
+  transform: rotate(180deg);
+}
+.sumRowOpen {
+  z-index: 20;
+}
+.quickEdit {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: -12px;
+  right: -12px;
+  z-index: 20;
+  padding: 2px 14px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3), 0 8px 24px rgba(60, 64, 67, 0.2);
+  animation: tin 0.12s ease-out;
+}
+.quickEdit .field {
+  margin-top: 10px;
+}
+.quickEdit .captionTall {
+  min-height: 96px;
+}
+.quickEditFoot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.quickThumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quickThumb {
+  position: relative;
+  width: 52px;
+  height: 65px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.quickThumb .ph {
+  height: 100%;
+}
+.quickThumb button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+.quickThumb button:hover {
+  background: var(--bad);
+}
+
+/* ---------- Review step for teammates (admin does the final review) ---------- */
+.reviewNotice {
+  display: grid;
+  place-items: center;
+  margin: 16px 0 12px;
+  height: max(460px, calc(100vh - 348px));
+}
+.reviewNoticeCard {
+  width: min(520px, 100%);
+  padding: 28px 32px;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.reviewNoticeCard h2 {
+  margin: 18px 0 6px;
+  font: 500 20px var(--f-display);
+}
+.reviewNoticeCard > p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 400px;
+}
+.reviewNoticeCover {
+  position: relative;
+  width: 96px;
+  height: 120px;
+  border-radius: 12px;
+  overflow: visible;
+}
+.reviewNoticeCover > .ph {
+  height: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.reviewNoticeBadge {
+  position: absolute;
+  right: -12px;
+  bottom: -12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 3px var(--surface);
+}
+.reviewNoticeBadgeOk {
+  background: var(--ok);
+}
+.reviewNoticeAdmins {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.reviewNoticeAdmin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 3px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.reviewNoticeCard > .reviewNoticeMeta {
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
