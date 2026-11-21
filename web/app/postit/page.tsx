@@ -246,6 +246,28 @@ interface Group {
   inviteOnly?: boolean;
   invites?: GroupInvite[];
   activity: ActivityItem[];
+  // Lets anyone skip the invite flow and join directly for testing. Optional
+  // because groups synced from before this existed won't have one.
+  code?: string;
+}
+
+const ROOM_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+function generateRoomCode(existing: Group[]): string {
+  const used = new Set(existing.map((g) => g.code).filter(Boolean));
+  let code: string;
+  do {
+    code = Array.from({ length: 6 }, () => ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]).join("");
+  } while (used.has(code));
+  return code;
+}
+
+function formatRoomCode(code: string): string {
+  return `${code.slice(0, 3)} ${code.slice(3)}`;
+}
+
+function normalizeRoomCode(s: string): string {
+  return s.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function canSeeGroup(group: Group, user: CurrentUser): boolean {
@@ -298,11 +320,19 @@ function makeInitialGroups(): Group[] {
   const lookbookPhotos = makeSeedPhotos(13, ["jordan", "lena", "maya"], 70, "folder-p1");
   const cafePhotos = makeSeedPhotos(9, ["maya", "sam"], 48, "folder-p2");
   const btsPhotos = makeSeedPhotos(6, ["sam", "lena", "jordan"], 30, "folder-p3");
+  const usedSeedCodes = new Set<string>();
+  const nextSeedCode = () => {
+    let code = generateRoomCode([]);
+    while (usedSeedCodes.has(code)) code = generateRoomCode([]);
+    usedSeedCodes.add(code);
+    return code;
+  };
   return [
     {
       id: "ribbonclub",
       name: "Ribbon Club",
       color: "#E4572E",
+      code: nextSeedCode(),
       members: [memberFromPerson("jordan", "admin"), memberFromPerson("lena", "member"), memberFromPerson("maya", "member")],
       instagramAccounts: [{ id: "ig-ribbonclub", handle: "@ribbonclub" }],
       media: lookbookPhotos,
@@ -344,6 +374,7 @@ function makeInitialGroups(): Group[] {
       id: "riverfront",
       name: "Riverfront Café",
       color: "#2F6FEB",
+      code: nextSeedCode(),
       members: [memberFromPerson("maya", "admin"), memberFromPerson("sam", "member")],
       instagramAccounts: [{ id: "ig-riverfront", handle: "@riverfrontcafe" }],
       media: cafePhotos,
@@ -377,6 +408,7 @@ function makeInitialGroups(): Group[] {
       id: "studio",
       name: "Postit Studio",
       color: "#13A06B",
+      code: nextSeedCode(),
       members: [memberFromPerson("sam", "admin"), memberFromPerson("lena", "member"), memberFromPerson("jordan", "member"), memberFromPerson("theo", "member")],
       instagramAccounts: [],
       media: btsPhotos,
@@ -451,6 +483,8 @@ const ICON_PATHS = {
   eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
   share: '<path d="M7 17 17 7"/><path d="M7 7h10v10"/>',
   dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  key: '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
 } as const;
 
 function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: number }) {
@@ -572,6 +606,8 @@ export default function PostitPage() {
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [joiningWithCode, setJoiningWithCode] = useState(false);
+  const [createdGroup, setCreatedGroup] = useState<{ name: string; code: string } | null>(null);
   const [creatingPost, setCreatingPost] = useState(false);
   const [invitingTeam, setInvitingTeam] = useState(false);
   const [linkingInstagram, setLinkingInstagram] = useState(false);
@@ -682,18 +718,33 @@ export default function PostitPage() {
         icon: "instagram",
       });
     }
-    const group: Group = { id, name, color, members, instagramAccounts, media: [], folders: [], posts: [], chat: [], inviteOnly: true, invites, activity: activity.reverse() };
+    const code = generateRoomCode(groupsRef.current);
+    const group: Group = { id, name, color, members, instagramAccounts, media: [], folders: [], posts: [], chat: [], inviteOnly: true, invites, code, activity: activity.reverse() };
     commitGroups([...groupsRef.current, group]);
     setActiveGroupId(id);
     setScreen("posts");
     setActivePostId(null);
     setStage("app");
     setCreatingGroup(false);
-    pushToast(
-      `Created <em>${name}</em>${invites.length ? ` and sent ${invites.length} invite${invites.length === 1 ? "" : "s"}` : ""}.${
-        instagramAccounts.length ? "" : " Link an Instagram account before you post."
-      }`
-    );
+    setCreatedGroup({ name, code });
+    if (invites.length) pushToast(`Sent ${invites.length} invite${invites.length === 1 ? "" : "s"}.`);
+    if (!instagramAccounts.length) pushToast("Link an Instagram account before you post.");
+  };
+
+  const handleJoinWithCode = (raw: string): string | undefined => {
+    if (!user) return "Sign in first.";
+    const code = normalizeRoomCode(raw);
+    if (!code) return "Enter a code.";
+    const group = groupsRef.current.find((g) => g.code && normalizeRoomCode(g.code) === code);
+    if (!group) return "That code doesn't match a group.";
+    if (!group.members.some((m) => m.id === user.id)) {
+      const me: Member = { id: user.id, name: user.name, email: user.email, username: user.username, role: "member", color: user.color, fg: "#fff" };
+      commitGroups(groupsRef.current.map((g) => (g.id === group.id ? { ...g, members: [...g.members, me] } : g)));
+    }
+    setJoiningWithCode(false);
+    handleSelectGroup(group.id);
+    pushToast(`Joined <em>${group.name}</em>.`);
+    return undefined;
   };
 
   const handleDeleteGroup = (groupId: string) => {
@@ -977,6 +1028,7 @@ export default function PostitPage() {
           onRespondInvite={handleRespondInvite}
           onSelect={handleSelectGroup}
           onCreate={() => setCreatingGroup(true)}
+          onJoinWithCode={() => setJoiningWithCode(true)}
           onSignOut={handleSignOut}
           onDeleteGroup={handleDeleteGroup}
         />
@@ -1032,6 +1084,8 @@ export default function PostitPage() {
       )}
 
       {creatingGroup && <CreateGroupModal allGroups={groups} onCreate={handleCreateGroup} onCancel={() => setCreatingGroup(false)} />}
+      {joiningWithCode && <JoinWithCodeModal onJoin={handleJoinWithCode} onCancel={() => setJoiningWithCode(false)} />}
+      {createdGroup && <CreatedGroupModal name={createdGroup.name} code={createdGroup.code} onDone={() => setCreatedGroup(null)} />}
       {creatingPost && <CreatePostModal onCreate={handleCreatePost} onCancel={() => setCreatingPost(false)} />}
       {invitingTeam && activeGroup && user && (
         <InviteModal
@@ -1152,6 +1206,7 @@ function GroupPicker({
   onRespondInvite,
   onSelect,
   onCreate,
+  onJoinWithCode,
   onSignOut,
   onDeleteGroup,
 }: {
@@ -1161,6 +1216,7 @@ function GroupPicker({
   onRespondInvite: (groupId: string, inviteId: string, accept: boolean) => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  onJoinWithCode: () => void;
   onSignOut: () => void;
   onDeleteGroup: (id: string) => void;
 }) {
@@ -1252,6 +1308,9 @@ function GroupPicker({
           })}
           <button className={`${styles.groupCard} ${styles.groupNew}`} onClick={onCreate}>
             <Icon name="plus" size={18} /> Create a group
+          </button>
+          <button className={`${styles.groupCard} ${styles.groupNew}`} onClick={onJoinWithCode}>
+            <Icon name="key" size={18} /> Join with a code
           </button>
         </div>
       </div>
@@ -1399,6 +1458,84 @@ function InstagramEditor({ handles, setHandles }: { handles: string[]; setHandle
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function CreatedGroupModal({ name, code, onDone }: { name: string; code: string; onDone: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard access can fail (permissions, insecure context); the code is still shown on screen.
+    }
+  };
+  return (
+    <div className={styles.overlay} onClick={onDone}>
+      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <h2>{name} created</h2>
+        <p className={styles.sub}>Share this code so testers can join &mdash; no invite needed.</p>
+        <div className={styles.codeDisplay}>
+          <span className={styles.codeDisplayText}>{formatRoomCode(code)}</span>
+          <button type="button" className={styles.btnGhost2} onClick={copy}>
+            <Icon name="copy" size={13} /> {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+        <div className={styles.modalActions}>
+          <button type="button" className={styles.btnPrimary} onClick={onDone}>
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JoinWithCodeModal({ onJoin, onCancel }: { onJoin: (code: string) => string | undefined; onCancel: () => void }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!code.trim()) {
+      setError("Enter a code.");
+      return;
+    }
+    const result = onJoin(code);
+    if (result) setError(result);
+  };
+
+  return (
+    <div className={styles.overlay} onClick={onCancel}>
+      <form className={styles.modal} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h2>Join with a code</h2>
+        <p className={styles.sub}>Ask whoever created the group for their room code.</p>
+        <div className={styles.field}>
+          <input
+            className={`${styles.input} ${styles.codeInput}`}
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value);
+              setError("");
+            }}
+            placeholder="X7K 2QP"
+            autoFocus
+            maxLength={8}
+          />
+          {error && <p className={styles.fieldError}>{error}</p>}
+        </div>
+        <div className={styles.modalActions}>
+          <button type="button" className={styles.btnGhost} onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className={styles.btnPrimary} disabled={!code.trim()}>
+            Join
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

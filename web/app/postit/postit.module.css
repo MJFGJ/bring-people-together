@@ -1466,6 +1466,37 @@
   color: var(--ink-3);
   margin-top: -2px;
 }
+.fieldError {
+  font-size: 12px;
+  color: var(--bad);
+  margin: 4px 0 0;
+}
+
+/* ---------- room code ---------- */
+.codeDisplay {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 2px 0 16px;
+}
+.codeDisplayText {
+  flex: 1;
+  font-family: var(--f-mono);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.codeInput {
+  font-family: var(--f-mono);
+  font-size: 16px;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+}
 
 /* ---------- role toggle (invite + roles) ---------- */
 .roleToggle {
