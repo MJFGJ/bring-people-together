@@ -278,6 +278,38 @@ function primaryHandle(group: Group): string {
   return group.instagramAccounts[0]?.handle ?? "Not linked";
 }
 
+// Shrinks an uploaded image to a small JPEG data URL so it can ride along in
+// the same synced group snapshot everything else uses, instead of a
+// URL.createObjectURL blob URL — which only ever resolves inside the tab that
+// created it, so every other viewer just sees a broken image.
+function compressImageFile(file: File, maxDim = 1024, quality = 0.6): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Canvas 2D not supported"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not read image"));
+    };
+    img.src = objectUrl;
+  });
+}
+
 function makeSeedPhotos(count: number, members: string[], startAgoMin: number, folderId: string | null = null): Photo[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `seed-${startAgoMin}-${i}`,
@@ -879,26 +911,31 @@ export default function PostitPage() {
     if (!activeGroupId || !user) return;
     const picked = Array.from(files).filter((f) => f.type.startsWith("image/"));
     if (!picked.length) return;
-    const newPhotos: Photo[] = picked.map((f, i) => ({
-      id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-      name: f.name,
-      url: URL.createObjectURL(f),
-      tone: (i * 29 + 13) % 85 + 8,
-      uploadedBy: user.name,
-      at: Date.now(),
-      folderId,
-    }));
-    updateGroup(activeGroupId, (g) => ({ ...g, media: [...g.media, ...newPhotos] }));
-    const groupName = groups.find((g) => g.id === activeGroupId)?.name;
-    pushActivity(activeGroupId, {
-      actorName: user.name,
-      color: user.color,
-      fg: "#fff",
-      verb: `added ${newPhotos.length} ${newPhotos.length === 1 ? "photo" : "photos"} to`,
-      target: groupName,
-      icon: "image",
+    const groupId = activeGroupId;
+    const uploaderName = user.name;
+    const uploaderColor = user.color;
+    Promise.all(picked.map((f) => compressImageFile(f).catch(() => null))).then((urls) => {
+      const newPhotos: Photo[] = picked.map((f, i) => ({
+        id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        name: f.name,
+        url: urls[i],
+        tone: (i * 29 + 13) % 85 + 8,
+        uploadedBy: uploaderName,
+        at: Date.now(),
+        folderId,
+      }));
+      updateGroup(groupId, (g) => ({ ...g, media: [...g.media, ...newPhotos] }));
+      const groupName = groupsRef.current.find((g) => g.id === groupId)?.name;
+      pushActivity(groupId, {
+        actorName: uploaderName,
+        color: uploaderColor,
+        fg: "#fff",
+        verb: `added ${newPhotos.length} ${newPhotos.length === 1 ? "photo" : "photos"} to`,
+        target: groupName,
+        icon: "image",
+      });
+      pushToast(`Added ${newPhotos.length} ${newPhotos.length === 1 ? "photo" : "photos"}.`);
     });
-    pushToast(`Added ${newPhotos.length} ${newPhotos.length === 1 ? "photo" : "photos"}.`);
   };
 
   const handleCreateFolder = (name: string) => {
