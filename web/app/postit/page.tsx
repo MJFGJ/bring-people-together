@@ -1462,7 +1462,7 @@ function InstagramEditor({ handles, setHandles }: { handles: string[]; setHandle
   );
 }
 
-function CreatedGroupModal({ name, code, onDone }: { name: string; code: string; onDone: () => void }) {
+function RoomCodeBlock({ code, compact }: { code: string; compact?: boolean }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -1474,16 +1474,25 @@ function CreatedGroupModal({ name, code, onDone }: { name: string; code: string;
     }
   };
   return (
+    <div className={styles.field}>
+      <label>Room code</label>
+      <div className={`${styles.codeDisplay} ${compact ? styles.codeDisplayCompact : ""}`}>
+        <span className={styles.codeDisplayText}>{formatRoomCode(code)}</span>
+        <button type="button" className={styles.btnGhost2} onClick={copy}>
+          <Icon name="copy" size={13} /> {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CreatedGroupModal({ name, code, onDone }: { name: string; code: string; onDone: () => void }) {
+  return (
     <div className={styles.overlay} onClick={onDone}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <h2>{name} created</h2>
         <p className={styles.sub}>Share this code so testers can join &mdash; no invite needed.</p>
-        <div className={styles.codeDisplay}>
-          <span className={styles.codeDisplayText}>{formatRoomCode(code)}</span>
-          <button type="button" className={styles.btnGhost2} onClick={copy}>
-            <Icon name="copy" size={13} /> {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
+        <RoomCodeBlock code={code} />
         <div className={styles.modalActions}>
           <button type="button" className={styles.btnPrimary} onClick={onDone}>
             Got it
@@ -1647,6 +1656,8 @@ function InviteModal({
         <p className={styles.sub}>
           Who&rsquo;s in <b>{group.name}</b>. Admins can post and invite people; team members can request a post.
         </p>
+
+        {group.code && <RoomCodeBlock code={group.code} compact />}
 
         {isAdmin ? (
           <TeamEditor drafts={drafts} setDrafts={setDrafts} allGroups={allGroups} canRemoveMembers memberIds={memberIds} addLabel="Invite someone" />

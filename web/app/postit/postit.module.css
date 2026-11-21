@@ -1490,6 +1490,13 @@
   font-weight: 700;
   letter-spacing: 0.1em;
 }
+.codeDisplayCompact {
+  padding: 8px 14px;
+  margin-bottom: 0;
+}
+.codeDisplayCompact .codeDisplayText {
+  font-size: 15px;
+}
 .codeInput {
   font-family: var(--f-mono);
   font-size: 16px;
